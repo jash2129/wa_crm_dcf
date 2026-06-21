@@ -61,6 +61,7 @@ const SECURITY_HEADERS = [
 ] as const;
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["*.ngrok-free.dev"],
   /**
    * Cache-Control policy.
    *

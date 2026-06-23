@@ -537,6 +537,18 @@ export default function InboxPage() {
     [activeConversation]
   );
 
+  // Toggle body class to hide the mobile bottom navigation bar when a chat is open.
+  useEffect(() => {
+    if (activeConversation) {
+      document.body.classList.add("hide-bottom-nav");
+    } else {
+      document.body.classList.remove("hide-bottom-nav");
+    }
+    return () => {
+      document.body.classList.remove("hide-bottom-nav");
+    };
+  }, [activeConversation]);
+
   // On mobile (<lg) we show a SINGLE pane — either the list or the
   // thread — rather than cramming both side-by-side. Selecting a
   // conversation slides the thread in; the thread's back button pops

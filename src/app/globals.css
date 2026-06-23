@@ -228,3 +228,13 @@ html[data-theme="rose"] {
     @apply font-sans;
   }
 }
+
+/* Mobile layout helpers for weekend operators */
+body.hide-bottom-nav .mobile-bottom-nav {
+  display: none !important;
+}
+@media (max-width: 1023px) {
+  body.hide-bottom-nav main {
+    padding-bottom: 1rem !important;
+  }
+}

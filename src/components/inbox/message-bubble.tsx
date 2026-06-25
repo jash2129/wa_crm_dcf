@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import type { Message, MessageReaction } from "@/types";
@@ -13,8 +14,13 @@ import {
   LayoutTemplate,
   ImageOff,
   CornerDownLeft,
+  Download,
+  Eye,
 } from "lucide-react";
 import { format } from "date-fns";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ReplyQuote } from "./reply-quote";
 import { MessageReactions } from "./message-reactions";
 
@@ -49,6 +55,274 @@ function MediaUnavailable({ label }: { label: string }) {
     <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
       <ImageOff className="h-4 w-4 shrink-0 text-muted-foreground" />
       <span>{label} unavailable</span>
+    </div>
+  );
+}
+
+function getExtensionFromMime(mimeType: string): string {
+  switch (mimeType) {
+    case "image/jpeg":
+      return ".jpg";
+    case "image/png":
+      return ".png";
+    case "image/gif":
+      return ".gif";
+    case "image/webp":
+      return ".webp";
+    case "video/mp4":
+      return ".mp4";
+    case "video/quicktime":
+      return ".mov";
+    case "audio/mpeg":
+    case "audio/mp3":
+      return ".mp3";
+    case "audio/ogg":
+      return ".ogg";
+    case "audio/aac":
+      return ".aac";
+    case "audio/wav":
+      return ".wav";
+    case "audio/ogg; codecs=opus":
+    case "audio/ogg;codecs=opus":
+    case "audio/opus":
+      return ".ogg";
+    case "application/pdf":
+      return ".pdf";
+    default:
+      return "";
+  }
+}
+
+async function handleDownload(url: string, defaultFilename: string) {
+  try {
+    let downloadUrl = url;
+    let filename = defaultFilename;
+
+    if (url.startsWith("/api/whatsapp/media/")) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch media");
+      const blob = await res.blob();
+      downloadUrl = URL.createObjectURL(blob);
+
+      const hasExtension = filename.includes(".");
+      if (!hasExtension && blob.type) {
+        const ext = getExtensionFromMime(blob.type);
+        filename = `${filename}${ext}`;
+      }
+    } else {
+      try {
+        const res = await fetch(url);
+        if (res.ok) {
+          const blob = await res.blob();
+          downloadUrl = URL.createObjectURL(blob);
+          const hasExtension = filename.includes(".");
+          if (!hasExtension && blob.type) {
+            const ext = getExtensionFromMime(blob.type);
+            filename = `${filename}${ext}`;
+          }
+        }
+      } catch (e) {
+        console.warn("CORS fetch failed, falling back to direct download link", e);
+      }
+    }
+
+    const a = document.createElement("a");
+    a.href = downloadUrl;
+    a.download = filename;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    if (downloadUrl.startsWith("blob:")) {
+      setTimeout(() => URL.revokeObjectURL(downloadUrl), 100);
+    }
+  } catch (error) {
+    console.error("Download failed:", error);
+    toast.error("Failed to download media file");
+  }
+}
+
+interface MediaPreviewModalProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  url: string;
+  type: "image" | "video";
+  filename: string;
+}
+
+function MediaPreviewModal({
+  isOpen,
+  onOpenChange,
+  url,
+  type,
+  filename,
+}: MediaPreviewModalProps) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    let active = true;
+    let localBlobUrl = "";
+    setLoading(true);
+    setError(false);
+
+    const load = async () => {
+      if (url.startsWith("/api/whatsapp/media/")) {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error("Failed to load preview");
+          const blob = await res.blob();
+          if (active) {
+            localBlobUrl = URL.createObjectURL(blob);
+            setSrc(localBlobUrl);
+          }
+        } catch {
+          if (active) setError(true);
+        } finally {
+          if (active) setLoading(false);
+        }
+      } else {
+        if (active) {
+          setSrc(url);
+          setLoading(false);
+        }
+      }
+    };
+
+    load();
+
+    return () => {
+      active = false;
+      if (localBlobUrl) {
+        URL.revokeObjectURL(localBlobUrl);
+      }
+    };
+  }, [url, isOpen]);
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="max-w-4xl w-full border-none bg-black/90 p-0 text-white shadow-2xl ring-0 focus-visible:outline-none overflow-hidden"
+        showCloseButton={true}
+      >
+        <DialogTitle className="sr-only font-heading">Media Preview - {filename}</DialogTitle>
+        <div className="relative flex flex-col items-center justify-center p-6 min-h-[60vh] max-h-[85vh]">
+          {loading && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent" />
+            </div>
+          )}
+
+          {error && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+              <ImageOff className="h-12 w-12 text-zinc-500" />
+              <p className="text-sm text-zinc-400">Failed to load preview</p>
+            </div>
+          )}
+
+          {!loading && !error && src && (
+            <div className="flex-1 flex items-center justify-center w-full h-full overflow-hidden">
+              {type === "image" ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={src}
+                  alt={filename}
+                  className="max-h-[70vh] max-w-full rounded-lg object-contain select-none shadow-lg animate-in fade-in zoom-in duration-200"
+                />
+              ) : (
+                <video
+                  src={src}
+                  controls
+                  autoPlay
+                  className="max-h-[70vh] max-w-full rounded-lg object-contain shadow-lg animate-in fade-in zoom-in duration-200"
+                />
+              )}
+            </div>
+          )}
+
+          {/* Controls footer */}
+          <div className="mt-4 flex items-center justify-between w-full border-t border-zinc-800 pt-4 px-2 bg-black/40 backdrop-blur-sm">
+            <span className="text-xs text-zinc-400 truncate max-w-[70%] font-medium">
+              {filename}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleDownload(url, filename)}
+              className="border-zinc-700 bg-zinc-800/50 text-white hover:bg-zinc-800 hover:text-white"
+            >
+              <Download className="h-4 w-4 mr-1.5" />
+              Download
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function MediaWrapper({
+  children,
+  url,
+  type,
+  filename,
+}: {
+  children: React.ReactNode;
+  url: string;
+  type: "image" | "video";
+  filename: string;
+}) {
+  const [modalOpen, setModalOpen] = useState(false);
+
+  return (
+    <div className="group relative inline-block overflow-hidden rounded-lg">
+      <div
+        onClick={type === "image" ? () => setModalOpen(true) : undefined}
+        className={cn(type === "image" && "cursor-pointer hover:brightness-95 transition-all")}
+      >
+        {children}
+      </div>
+
+      {/* Floating controls in top-right */}
+      <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-10">
+        <Button
+          variant="secondary"
+          size="icon-xs"
+          className="h-7 w-7 rounded-full bg-black/60 hover:bg-black/80 text-white border-none shadow-md backdrop-blur-xs"
+          onClick={(e) => {
+            e.stopPropagation();
+            setModalOpen(true);
+          }}
+          title="Preview"
+        >
+          <Eye className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="secondary"
+          size="icon-xs"
+          className="h-7 w-7 rounded-full bg-black/60 hover:bg-black/80 text-white border-none shadow-md backdrop-blur-xs"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleDownload(url, filename);
+          }}
+          title="Download"
+        >
+          <Download className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
+      <MediaPreviewModal
+        isOpen={modalOpen}
+        onOpenChange={setModalOpen}
+        url={url}
+        type={type}
+        filename={filename}
+      />
     </div>
   );
 }
@@ -117,6 +391,8 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
 }
 
 function MessageContent({ message }: { message: Message }) {
+  const isAgent = message.sender_type === "agent" || message.sender_type === "bot";
+
   switch (message.content_type) {
     case "text":
       return (
@@ -125,11 +401,21 @@ function MessageContent({ message }: { message: Message }) {
         </p>
       );
 
-    case "image":
+    case "image": {
+      const filename = message.content_text
+        ? `${message.content_text.substring(0, 20)}`
+        : `image_${message.id.substring(0, 8)}`;
       return (
         <div>
           {message.media_url ? (
-            <MediaImage url={message.media_url} alt="Shared image" />
+            <MediaWrapper
+              url={message.media_url}
+              type="image"
+              filename={filename}
+              messageId={message.id}
+            >
+              <MediaImage url={message.media_url} alt="Shared image" />
+            </MediaWrapper>
           ) : (
             <MediaUnavailable label="Image" />
           )}
@@ -140,16 +426,27 @@ function MessageContent({ message }: { message: Message }) {
           )}
         </div>
       );
+    }
 
-    case "video":
+    case "video": {
+      const filename = message.content_text
+        ? `${message.content_text.substring(0, 20)}`
+        : `video_${message.id.substring(0, 8)}`;
       return (
         <div>
           {message.media_url ? (
-            <video
-              src={message.media_url}
-              controls
-              className="max-h-64 max-w-60 rounded-lg"
-            />
+            <MediaWrapper
+              url={message.media_url}
+              type="video"
+              filename={filename}
+              messageId={message.id}
+            >
+              <video
+                src={message.media_url}
+                controls
+                className="max-h-64 max-w-60 rounded-lg object-cover"
+              />
+            </MediaWrapper>
           ) : (
             <MediaUnavailable label="Video" />
           )}
@@ -160,35 +457,68 @@ function MessageContent({ message }: { message: Message }) {
           )}
         </div>
       );
+    }
 
-    case "audio":
+    case "audio": {
+      const filename = `audio_${message.id.substring(0, 8)}`;
       return (
-        <div>
+        <div className="flex items-center gap-2">
           {message.media_url ? (
-            <audio src={message.media_url} controls className="max-w-60" />
+            <>
+              <audio src={message.media_url} controls className="max-w-60" />
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className={cn(
+                  "h-8 w-8 rounded-full shrink-0 transition-colors",
+                  isAgent
+                    ? "text-primary-foreground/80 hover:bg-primary-foreground/10 hover:text-primary-foreground"
+                    : "text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
+                )}
+                onClick={() => handleDownload(message.media_url!, filename, message.id)}
+                title="Download Audio"
+              >
+                <Download className="h-4 w-4" />
+              </Button>
+            </>
           ) : (
             <MediaUnavailable label="Audio" />
           )}
         </div>
       );
+    }
 
-    case "document":
+    case "document": {
       if (!message.media_url) {
         return <MediaUnavailable label={message.content_text || "Document"} />;
       }
+      const filename = message.content_text || "document";
       return (
-        <a
-          href={message.media_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted"
-        >
-          <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
-          <span className="truncate">
-            {message.content_text || "Document"}
-          </span>
-        </a>
+        <div className="flex items-center gap-2">
+          <a
+            href={message.media_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => {
+              e.preventDefault();
+              handleDownload(message.media_url!, filename, message.id);
+            }}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors w-full max-w-60 min-w-40 border",
+              isAgent
+                ? "bg-primary-foreground/10 border-primary-foreground/20 hover:bg-primary-foreground/20 text-primary-foreground"
+                : "bg-muted/50 border-muted hover:bg-muted text-foreground"
+            )}
+          >
+            <FileText className={cn("h-5 w-5 shrink-0", isAgent ? "text-primary-foreground/80" : "text-muted-foreground")} />
+            <span className="truncate flex-1 font-medium text-left">
+              {filename}
+            </span>
+            <Download className={cn("h-4 w-4 shrink-0", isAgent ? "text-primary-foreground/75" : "text-muted-foreground")} />
+          </a>
+        </div>
       );
+    }
 
     case "template":
       return (

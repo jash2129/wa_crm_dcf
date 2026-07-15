@@ -61,6 +61,7 @@ const SECURITY_HEADERS = [
 ] as const;
 
 const nextConfig: NextConfig = {
+  compress: false, // Fix for Hostinger/LiteSpeed corrupting Next.js chunked streaming responses
   allowedDevOrigins: ["*.ngrok-free.dev"],
   /**
    * Cache-Control policy.

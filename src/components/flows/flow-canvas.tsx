@@ -628,6 +628,7 @@ const ADD_NODE_TYPES: NodeType[] = [
   "condition",
   "set_tag",
   "handoff",
+  "ai_reply",
   "end",
 ];
 

@@ -54,7 +54,7 @@ export function ValidationPanel() {
         {errors.length} error{errors.length === 1 ? "" : "s"},{" "}
         {warnings.length} warning{warnings.length === 1 ? "" : "s"}
       </div>
-      <div className="flex flex-col gap-1">
+      <div className="flex max-h-64 flex-col gap-1 overflow-y-auto">
         {issues.map((i, ix) => (
           <IssueLine key={ix} issue={i} onJump={requestFlash} />
         ))}

@@ -226,8 +226,16 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
       return slots;
     }
 
+    case "ai_reply":
+      return [
+        { id: "next", label: "Success" },
+        { id: "fallback", label: "Fallback" },
+      ];
+
     case "handoff":
     case "end":
+      return [];
+    default:
       return [];
   }
 }
@@ -310,8 +318,16 @@ export function applyEdgeConnection(
       return matched ? { sections: next } : null;
     }
 
+    case "ai_reply": {
+      if (sourceHandle === "next") return { next_node_key: targetKey };
+      if (sourceHandle === "fallback") return { fallback_node_key: targetKey };
+      return null;
+    }
+
     case "handoff":
     case "end":
+      return null;
+    default:
       return null;
   }
 }
@@ -404,8 +420,22 @@ function patchedConfigWithoutKey(
       return dirty ? { ...cfg, sections: next } : null;
     }
 
+    case "ai_reply": {
+      const c = cfg as { next_node_key?: string; fallback_node_key?: string };
+      const nextMatch = c.next_node_key === deletedKey;
+      const fallbackMatch = c.fallback_node_key === deletedKey;
+      if (!nextMatch && !fallbackMatch) return null;
+      return {
+        ...cfg,
+        ...(nextMatch ? { next_node_key: "" } : {}),
+        ...(fallbackMatch ? { fallback_node_key: "" } : {}),
+      };
+    }
+
     case "handoff":
     case "end":
+      return null;
+    default:
       return null;
   }
 }

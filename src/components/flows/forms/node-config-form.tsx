@@ -24,7 +24,7 @@
  * renders the advanced rows.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, Component } from "react";
 import {
   Loader2,
   Paperclip,
@@ -45,6 +45,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
 import { uploadAccountMedia, MEDIA_MAX_BYTES } from "@/lib/storage/upload-media";
 import { slugify, type BuilderNode } from "../shared";
 import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
@@ -56,7 +57,39 @@ interface NodeConfigFormProps {
   onUpdateConfig: (patch: Record<string, unknown>) => void;
 }
 
-export function NodeConfigForm({
+class NodeConfigErrorBoundary extends Component<{children: React.ReactNode}, {hasError: boolean, error?: Error}> {
+  constructor(props: {children: React.ReactNode}) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, errorInfo: any) {
+    console.error("Node config error:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-3 text-sm text-red-500 bg-red-500/10 rounded border border-red-500/20">
+          <p className="font-semibold mb-1">Configuration Error</p>
+          <p className="text-xs opacity-80">{this.state.error?.message}</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export function NodeConfigForm(props: NodeConfigFormProps) {
+  return (
+    <NodeConfigErrorBoundary>
+      <NodeConfigFormInner {...props} />
+    </NodeConfigErrorBoundary>
+  );
+}
+
+function NodeConfigFormInner({
   node,
   allNodes,
   showAdvanced,
@@ -195,6 +228,37 @@ export function NodeConfigForm({
           value={(cfg as { note?: string }).note ?? ""}
           onChange={(v) => onUpdateConfig({ note: v })}
           rows={2}
+        />
+      );
+
+    case "ai_reply":
+      return (
+        <AIReplyForm
+          cfg={cfg as AIReplyCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
+    case "ai_intent":
+      return (
+        <AIIntentForm
+          cfg={cfg as AIIntentCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
+    case "http_fetch":
+      return (
+        <HttpFetchForm
+          cfg={cfg as HttpFetchCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+          showAdvanced={showAdvanced}
         />
       );
 
@@ -849,6 +913,147 @@ function useUserTags(): UserTag[] {
 }
 
 // ============================================================
+// AI Reply Form
+// ============================================================
+
+export interface AIReplyCfg {
+  provider?: "openai" | "openrouter";
+  system_prompt?: string;
+  model?: string;
+  temperature?: number;
+  fallback_node_key?: string;
+  next_node_key?: string;
+  kb_id?: string;
+}
+
+function useKnowledgeBases(accountId: string | undefined | null) {
+  const [kbs, setKbs] = useState<Array<{ id: string; name: string }>>([]);
+  useEffect(() => {
+    if (!accountId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/knowledge-bases?account_id=${accountId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setKbs(data);
+      } catch (e) {
+        // Fallback
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId]);
+  return kbs;
+}
+
+export function AIReplyForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: AIReplyCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (p: Partial<AIReplyCfg>) => void;
+}) {
+  const { account } = useAuth();
+  const kbs = useKnowledgeBases(account?.id);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          AI Provider
+        </label>
+        <Select
+          value={cfg.provider || "openai"}
+          onValueChange={(val) =>
+            onUpdateConfig({ provider: val as "openai" | "openrouter" })
+          }
+        >
+          <SelectTrigger className="h-8">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="openai">OpenAI</SelectItem>
+            <SelectItem value="openrouter">OpenRouter</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          Model
+        </label>
+        <Input
+          value={cfg.model ?? ""}
+          onChange={(e) => onUpdateConfig({ model: e.target.value })}
+          placeholder="e.g. gpt-4o, claude-3.5-sonnet"
+          className="h-8"
+        />
+      </div>
+
+      <TextRow
+        label="System Prompt"
+        value={cfg.system_prompt ?? ""}
+        onChange={(v) => onUpdateConfig({ system_prompt: v })}
+        rows={6}
+      />
+      <p className="text-[10px] text-muted-foreground -mt-3 mb-2">
+        Define the bot's persona and rules. It will automatically receive the 
+        conversation's <code className="rounded bg-muted px-1">vars</code> as context.
+      </p>
+
+      {kbs.length > 0 && (
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            Knowledge Base (Optional RAG)
+          </label>
+          <Select
+            value={cfg.kb_id || "none"}
+            onValueChange={(val) => {
+              const strVal = val as string;
+              onUpdateConfig({ kb_id: strVal === "none" ? undefined : strVal });
+            }}
+          >
+            <SelectTrigger className="h-8">
+              <SelectValue placeholder="Select a knowledge base..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">None</SelectItem>
+              {kbs.map((kb) => (
+                <SelectItem key={kb.id} value={kb.id}>
+                  {kb.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label="Advances to (on success)"
+      />
+
+      <NextNodeRow
+        value={cfg.fallback_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ fallback_node_key: v })}
+        label="Fallback to (on error)"
+      />
+    </div>
+  );
+}
+
+// ============================================================
 // send_media
 // ============================================================
 
@@ -1044,5 +1249,316 @@ function SendMediaForm({
         label="After sending, advance to"
       />
     </>
+  );
+}
+
+// ============================================================
+// ai_intent
+// ============================================================
+
+interface AIIntentCfg {
+  prompt_text?: string;
+  branches?: { intent_name: string; description: string; next_node_key: string }[];
+  fallback_node_key?: string;
+}
+
+function AIIntentForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: AIIntentCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const branches = cfg.branches || [];
+
+  const addBranch = () => {
+    onUpdateConfig({
+      branches: [
+        ...branches,
+        { intent_name: "", description: "", next_node_key: "" },
+      ],
+    });
+  };
+
+  const updateBranch = (index: number, patch: Partial<typeof branches[0]>) => {
+    const next = [...branches];
+    next[index] = { ...next[index], ...patch };
+    onUpdateConfig({ branches: next });
+  };
+
+  const removeBranch = (index: number) => {
+    const next = [...branches];
+    next.splice(index, 1);
+    onUpdateConfig({ branches: next });
+  };
+
+  return (
+    <div className="space-y-4">
+      <TextRow
+        label="System Prompt (How the AI should behave)"
+        value={cfg.prompt_text ?? ""}
+        onChange={(v) => onUpdateConfig({ prompt_text: v })}
+        rows={3}
+      />
+
+      <div className="space-y-3 border-t border-border pt-3">
+        <label className="block text-xs font-medium text-foreground">
+          Intent Branches
+        </label>
+        {branches.length === 0 && (
+          <p className="text-xs text-muted-foreground">No branches added.</p>
+        )}
+        <div className="space-y-3">
+          {branches.map((b, ix) => (
+            <div key={ix} className="rounded-md border border-border bg-muted/30 p-2">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  Branch {ix + 1}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeBranch(ix)}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="space-y-2">
+                <Input
+                  value={b.intent_name}
+                  onChange={(e) => updateBranch(ix, { intent_name: e.target.value })}
+                  placeholder="Intent Name (e.g. Sales, Support)"
+                  className="h-8 text-xs font-medium"
+                />
+                <TextRow
+                  label="Description (Helps AI route correctly)"
+                  value={b.description}
+                  onChange={(v) => updateBranch(ix, { description: v })}
+                  rows={2}
+                />
+                <NextNodeRow
+                  value={b.next_node_key}
+                  allNodes={allNodes}
+                  currentKey={currentKey}
+                  onChange={(v) => updateBranch(ix, { next_node_key: v })}
+                  label="If matched, route to"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={addBranch}
+          className="w-full text-xs"
+        >
+          <Plus className="mr-2 h-3.5 w-3.5" />
+          Add Intent Branch
+        </Button>
+      </div>
+
+      <div className="border-t border-border pt-3">
+        <NextNodeRow
+          value={cfg.fallback_node_key ?? ""}
+          allNodes={allNodes}
+          currentKey={currentKey}
+          onChange={(v) => onUpdateConfig({ fallback_node_key: v })}
+          label="Fallback (If no intent matches)"
+        />
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// http_fetch
+// ============================================================
+
+interface HttpFetchCfg {
+  method?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  var_key?: string;
+  next_node_key?: string;
+  fallback_node_key?: string;
+}
+
+function HttpFetchForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+  showAdvanced,
+}: {
+  cfg: HttpFetchCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+  showAdvanced: boolean;
+}) {
+  const method = cfg.method || "GET";
+  const headers = cfg.headers || {};
+  const headerKeys = Object.keys(headers);
+
+  const setHeader = (key: string, val: string) => {
+    onUpdateConfig({ headers: { ...headers, [key]: val } });
+  };
+
+  const removeHeader = (key: string) => {
+    const { [key]: _, ...rest } = headers;
+    onUpdateConfig({ headers: rest });
+  };
+
+  const addHeader = () => {
+    const newKey = `Header-${headerKeys.length + 1}`;
+    onUpdateConfig({ headers: { ...headers, [newKey]: "" } });
+  };
+
+  const renameHeader = (oldKey: string, newKey: string) => {
+    if (oldKey === newKey) return;
+    const val = headers[oldKey];
+    const { [oldKey]: _, ...rest } = headers;
+    onUpdateConfig({ headers: { ...rest, [newKey]: val } });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        <div className="w-24 shrink-0">
+          <label className="mb-1.5 block text-xs font-medium text-foreground">
+            Method
+          </label>
+          <Select
+            value={method}
+            onValueChange={(v) => onUpdateConfig({ method: v })}
+          >
+            <SelectTrigger className="h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="GET">GET</SelectItem>
+              <SelectItem value="POST">POST</SelectItem>
+              <SelectItem value="PUT">PUT</SelectItem>
+              <SelectItem value="PATCH">PATCH</SelectItem>
+              <SelectItem value="DELETE">DELETE</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex-1 min-w-0">
+          <TextRow
+            label="URL (supports {{vars.foo}})"
+            value={cfg.url ?? ""}
+            onChange={(v) => onUpdateConfig({ url: v })}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <label className="block text-xs font-medium text-foreground">
+          Headers
+        </label>
+        {headerKeys.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No headers configured.</p>
+        ) : (
+          <div className="space-y-2">
+            {headerKeys.map((key) => (
+              <div key={key} className="flex items-center gap-2">
+                <Input
+                  value={key}
+                  onChange={(e) => renameHeader(key, e.target.value)}
+                  className="h-8 w-1/3 text-xs"
+                  placeholder="Key"
+                />
+                <Input
+                  value={headers[key]}
+                  onChange={(e) => setHeader(key, e.target.value)}
+                  className="h-8 flex-1 text-xs"
+                  placeholder="Value"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                  onClick={() => removeHeader(key)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={addHeader}
+          className="text-xs text-muted-foreground"
+        >
+          <Plus className="mr-2 h-3.5 w-3.5" />
+          Add Header
+        </Button>
+      </div>
+
+      {method !== "GET" && method !== "DELETE" && (
+        <TextRow
+          label="JSON Body (supports {{vars.foo}})"
+          value={cfg.body ?? ""}
+          onChange={(v) => onUpdateConfig({ body: v })}
+          rows={4}
+        />
+      )}
+
+      <div className="border-t border-border pt-4">
+        <div className="mb-4">
+          <label className="mb-1.5 block text-xs font-medium text-foreground">
+            Save JSON Response to Variable
+          </label>
+          <div className="relative">
+            <Input
+              value={cfg.var_key ?? ""}
+              onChange={(e) => {
+                const cleaned = slugify(e.target.value, "");
+                onUpdateConfig({ var_key: cleaned });
+              }}
+              className="pl-7 h-9 text-xs font-mono bg-muted/30"
+              placeholder="api_data"
+            />
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-mono">
+              $
+            </span>
+          </div>
+          {cfg.var_key && (
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              Reference later via <code className="rounded bg-muted px-1">{"{{vars."}{cfg.var_key}{".field}}"}</code>
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          <NextNodeRow
+            value={cfg.next_node_key ?? ""}
+            allNodes={allNodes}
+            currentKey={currentKey}
+            onChange={(v) => onUpdateConfig({ next_node_key: v })}
+            label="On Success (2xx), advance to"
+          />
+          <NextNodeRow
+            value={cfg.fallback_node_key ?? ""}
+            allNodes={allNodes}
+            currentKey={currentKey}
+            onChange={(v) => onUpdateConfig({ fallback_node_key: v })}
+            label="On Error (Network/4xx/5xx), route to"
+          />
+        </div>
+      </div>
+    </div>
   );
 }

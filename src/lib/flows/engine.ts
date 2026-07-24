@@ -39,6 +39,7 @@ import {
   engineSendMedia,
   engineSendText,
 } from "./meta-send";
+import OpenAI from "openai";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import {
   type CollectInputNodeConfig,
@@ -56,6 +57,9 @@ import {
   type SetTagNodeConfig,
   type StartNodeConfig,
   type KeywordTriggerConfig,
+  type AIReplyNodeConfig,
+  type AIIntentNodeConfig,
+  type HttpFetchNodeConfig,
 } from "./types";
 
 // ============================================================
@@ -116,7 +120,10 @@ export function isAutoAdvancing(node_type: string): boolean {
     node_type === "send_message" ||
     node_type === "send_media" ||
     node_type === "condition" ||
-    node_type === "set_tag"
+    node_type === "set_tag" ||
+    node_type === "ai_reply" ||
+    node_type === "ai_intent" ||
+    node_type === "http_fetch"
   );
 }
 
@@ -766,6 +773,312 @@ async function advanceFromNodeKey(
     if (node.node_type === "handoff") {
       await executeHandoff(db, run, node);
       return { outcome: "handed_off" };
+    }
+    if (node.node_type === "ai_reply") {
+      const cfg = node.config as unknown as AIReplyNodeConfig;
+      try {
+        const { data: providerKey } = await db
+          .from("ai_providers")
+          .select("api_key")
+          .eq("account_id", run.account_id)
+          .eq("provider", cfg.provider)
+          .single();
+
+        if (!providerKey?.api_key) {
+          throw new Error(`Missing ${cfg.provider} API key`);
+        }
+
+        const baseURL =
+          cfg.provider === "openrouter"
+            ? "https://openrouter.ai/api/v1"
+            : undefined;
+
+        const openai = new OpenAI({ apiKey: providerKey.api_key, baseURL });
+        
+        // 1. Convert vars to context string
+        const contextLines = Object.entries(run.vars).map(([k, v]) => `${k}: ${v}`);
+        let contextStr = contextLines.length > 0 ? `\n\nVariables:\n${contextLines.join('\n')}` : '';
+
+        // Fetch the last 10 messages for conversation history
+        const { data: history } = await db
+          .from("messages")
+          .select("content_text, sender_type")
+          .eq("conversation_id", run.conversation_id!)
+          .order("created_at", { ascending: false })
+          .limit(10);
+        
+        // Reverse to chronological order for the LLM
+        const chronologicalHistory = (history || []).reverse();
+
+        // Extract the most recent customer message for RAG search
+        const lastCustomerMessage = chronologicalHistory
+          .slice()
+          .reverse()
+          .find((m: any) => m.sender_type === "customer");
+          
+        const customerQuery = lastCustomerMessage?.content_text || "Hello";
+
+        if (cfg.kb_id) {
+          // If a Knowledge Base is configured, we need the OpenAI key for embeddings
+          // (assuming OpenAI is used for embeddings even if OpenRouter is used for the LLM)
+          let embedOpenAI = openai;
+          if (cfg.provider !== "openai") {
+            const { data: openaiKey } = await db
+              .from("ai_providers")
+              .select("api_key")
+              .eq("account_id", run.account_id)
+              .eq("provider", "openai")
+              .single();
+            if (openaiKey?.api_key) {
+              embedOpenAI = new OpenAI({ apiKey: openaiKey.api_key });
+            }
+          }
+
+          try {
+            const embedResponse = await embedOpenAI.embeddings.create({
+              input: customerQuery,
+              model: "text-embedding-3-small",
+            });
+            const query_embedding = embedResponse.data[0].embedding;
+
+            const { data: matches } = await db.rpc("match_knowledge", {
+              query_embedding: JSON.stringify(query_embedding) as any,
+              target_kb_id: cfg.kb_id,
+              match_threshold: 0.2,
+              match_count: 3,
+            });
+
+            if (matches && matches.length > 0) {
+              const kbContext = matches.map((m: any) => m.content).join("\n\n---\n\n");
+              contextStr += `\n\nKnowledge Base Results:\n${kbContext}`;
+            } else {
+              // Vector search returned nothing — fall back to full-text search
+              throw new Error("no_vector_results");
+            }
+          } catch (embedErr: any) {
+            console.error("RAG vector search failed, trying full-text fallback:", embedErr?.message);
+            // Full-text fallback: grab top 3 chunks that contain the customer's words
+            try {
+              const searchWords = customerQuery
+                .toLowerCase()
+                .split(/\s+/)
+                .filter((w: string) => w.length > 2)
+                .slice(0, 5)
+                .join(" | ");
+
+              if (searchWords) {
+                const { data: ftResults } = await db
+                  .from("knowledge_base_embeddings")
+                  .select("content, doc_id")
+                  .textSearch("content", searchWords, { type: "websearch", config: "english" })
+                  .limit(3);
+
+                // If no full-text results, grab the first 3 chunks from the KB
+                const finalResults = ftResults && ftResults.length > 0
+                  ? ftResults
+                  : await db
+                      .from("knowledge_base_embeddings")
+                      .select("content, doc_id")
+                      .in(
+                        "doc_id",
+                        (await db
+                          .from("knowledge_base_documents")
+                          .select("id")
+                          .eq("kb_id", cfg.kb_id!)
+                          .limit(5)
+                        ).data?.map((d: any) => d.id) ?? []
+                      )
+                      .limit(3)
+                      .then((r) => r.data);
+
+                if (finalResults && (finalResults as any[]).length > 0) {
+                  const kbContext = (finalResults as any[]).map((m: any) => m.content).join("\n\n---\n\n");
+                  contextStr += `\n\nKnowledge Base Results:\n${kbContext}`;
+                }
+              }
+            } catch (ftErr) {
+              console.error("Full-text fallback also failed:", ftErr);
+              // Non-fatal — continue without KB context
+            }
+          }
+        }
+
+        // Format history for the LLM
+        const chatHistory = chronologicalHistory
+          .filter((m: any) => m.content_text && m.content_text.trim() !== '')
+          .map((m: any) => ({
+            role: m.sender_type === 'customer' ? 'user' : 'assistant',
+            content: m.content_text,
+          }));
+
+        // If history is empty, fallback to the query
+        const finalMessages: any[] = [
+          { role: "system", content: cfg.system_prompt + contextStr },
+          ...chatHistory
+        ];
+        
+        if (chatHistory.length === 0) {
+          finalMessages.push({ role: "user", content: customerQuery });
+        }
+
+        const completion = await openai.chat.completions.create({
+          model: cfg.model,
+          messages: finalMessages,
+          temperature: cfg.temperature ?? 0.7,
+        });
+
+        const reply = completion.choices[0]?.message?.content;
+        if (!reply) throw new Error("Empty response from LLM");
+
+        const { whatsapp_message_id } = await engineSendText({
+          accountId: run.account_id,
+          userId: run.user_id,
+          conversationId: run.conversation_id!,
+          contactId: run.contact_id!,
+          text: reply,
+        });
+
+        await logEvent(db, run.id, "message_sent", node.node_key, {
+          node_type: "ai_reply",
+          whatsapp_message_id,
+          model: cfg.model,
+          provider: cfg.provider,
+        });
+        
+        currentKey = cfg.next_node_key;
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "ai_reply_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        currentKey = cfg.fallback_node_key;
+      }
+      continue;
+    }
+    if (node.node_type === "ai_intent") {
+      const cfg = node.config as unknown as AIIntentNodeConfig;
+      
+      try {
+        const { data: conv } = await db
+          .from("conversations")
+          .select("last_message_text")
+          .eq("id", run.conversation_id!)
+          .single();
+        const customerQuery = conv?.last_message_text || "";
+
+        const { data: providers } = await db
+          .from("ai_providers")
+          .select("provider, api_key")
+          .eq("account_id", run.account_id)
+          .eq("provider", cfg.provider ?? "openai")
+          .eq("is_active", true)
+          .single();
+
+        if (!providers) throw new Error(`AI provider ${cfg.provider} not configured`);
+
+        const baseURL = providers.provider === "openrouter"
+          ? "https://openrouter.ai/api/v1"
+          : undefined;
+
+        const openai = new OpenAI({ apiKey: providers.api_key, baseURL });
+        
+        const intentList = cfg.branches.map((b: any) => `- "${b.intent}": ${b.description}`).join("\n");
+        const prompt = `${cfg.system_prompt}\n\nYou must classify the user's message into EXACTLY ONE of the following intents:\n${intentList}\n\nRespond with ONLY the exact intent name, nothing else. No quotes, no explanation.`;
+
+        const completion = await openai.chat.completions.create({
+          model: cfg.model,
+          messages: [
+            { role: "system", content: prompt },
+            { role: "user", content: customerQuery }
+          ],
+          temperature: 0.1, // low temperature for classification
+        });
+
+        const reply = completion.choices[0]?.message?.content?.trim() || "";
+        const matchedBranch = cfg.branches.find((b: any) => b.intent.toLowerCase() === reply.toLowerCase());
+
+        await logEvent(db, run.id, "ai_intent_classified" as any, node.node_key, {
+          classified_as: reply,
+          matched: !!matchedBranch,
+          query: customerQuery,
+        });
+
+        if (matchedBranch && matchedBranch.next_node_key) {
+          currentKey = matchedBranch.next_node_key;
+        } else {
+          currentKey = cfg.fallback_node_key;
+        }
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "ai_intent_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        currentKey = cfg.fallback_node_key;
+      }
+      continue;
+    }
+    if (node.node_type === "http_fetch") {
+      const cfg = node.config as unknown as HttpFetchNodeConfig;
+      
+      try {
+        const method = cfg.method || "GET";
+        const url = interpolateVars(cfg.url || "", run.vars);
+        const reqHeaders: Record<string, string> = {};
+        
+        if (cfg.headers) {
+          for (const [k, v] of Object.entries(cfg.headers)) {
+            reqHeaders[k] = interpolateVars(v as string, run.vars);
+          }
+        }
+        
+        let reqBody: string | undefined = undefined;
+        if (method !== "GET" && method !== "DELETE" && cfg.body) {
+          reqBody = interpolateVars(cfg.body, run.vars);
+        }
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+        const response = await fetch(url, {
+          method,
+          headers: reqHeaders,
+          body: reqBody,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        let responseData: any = null;
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          responseData = await response.json();
+        } else {
+          responseData = await response.text();
+        }
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        }
+
+        if (cfg.var_key) {
+          run.vars[cfg.var_key] = responseData;
+          await db.from("flow_runs").update({ vars: run.vars }).eq("id", run.id);
+        }
+
+        await logEvent(db, run.id, "http_fetch_success" as any, node.node_key, {
+          url,
+          status: response.status,
+          var_key: cfg.var_key,
+        });
+
+        currentKey = cfg.next_node_key;
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "http_fetch_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        currentKey = cfg.fallback_node_key;
+      }
+      continue;
     }
     if (node.node_type === "end") {
       await logEvent(db, run.id, "completed", node.node_key);

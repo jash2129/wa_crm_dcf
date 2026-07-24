@@ -1,4 +1,4 @@
-import type {
+import {
   Automation,
   AutomationLogStepResult,
   AutomationStep,
@@ -13,9 +13,11 @@ import type {
   WaitStepConfig,
   CreateDealStepConfig,
   AssignConversationStepConfig,
+  AiGenerateStepConfig,
 } from '@/types'
 import { supabaseAdmin } from './admin-client'
 import { engineSendText, engineSendTemplate } from './meta-send'
+import OpenAI from 'openai'
 
 // ------------------------------------------------------------
 // Public API
@@ -545,6 +547,89 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         .eq('account_id', args.automation.account_id)
         .eq('contact_id', args.contactId)
       return 'conversation closed'
+    }
+
+    case 'ai_generate': {
+      const cfg = step.step_config as AiGenerateStepConfig
+      if (!cfg.provider || !cfg.model) throw new Error('ai_generate needs a provider and model')
+      
+      const { data: providerKey } = await db
+        .from('ai_providers')
+        .select('api_key')
+        .eq('account_id', args.automation.account_id)
+        .eq('provider', cfg.provider)
+        .eq('is_active', true)
+        .maybeSingle()
+        
+      if (!providerKey?.api_key) {
+        throw new Error(`ai_generate: No active API key found for ${cfg.provider}`)
+      }
+      
+      const systemPrompt = interpolate(cfg.system_prompt || '', args)
+      const prompt = interpolate(cfg.prompt || '', args)
+      
+      let memoryContext: { role: 'user' | 'assistant', content: string }[] = []
+      if (cfg.with_memory && args.contactId) {
+        const limit = cfg.memory_limit || 10
+        const { data: messages } = await db
+          .from('messages')
+          .select('text, direction')
+          .eq('account_id', args.automation.account_id)
+          .eq('contact_id', args.contactId)
+          .not('text', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(limit)
+          
+        if (messages && messages.length > 0) {
+          messages.reverse()
+          memoryContext = messages.map(m => ({
+            role: m.direction === 'inbound' ? 'user' : 'assistant',
+            content: m.text || ''
+          }))
+        }
+      }
+      
+      let aiResponse = ''
+      
+      if (cfg.provider === 'openai' || cfg.provider === 'openrouter') {
+        const baseURL = cfg.provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : undefined
+        const openai = new OpenAI({ apiKey: providerKey.api_key, baseURL })
+        
+        const completion = await openai.chat.completions.create({
+          model: cfg.model,
+          messages: [
+            ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
+            ...memoryContext,
+            { role: 'user' as const, content: prompt }
+          ]
+        })
+        
+        aiResponse = completion.choices[0]?.message?.content || ''
+      } else if (cfg.provider === 'sarvam') {
+        // Sarvam memory formatting
+        const sarvamHistory = memoryContext.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\\n')
+        
+        const res = await fetch('https://api.sarvam.ai/text-generate', {
+          method: 'POST',
+          headers: {
+            'api-subscription-key': providerKey.api_key,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            prompt: `${systemPrompt ? systemPrompt + '\\n' : ''}${sarvamHistory ? sarvamHistory + '\\n' : ''}User: ${prompt}`,
+            model: cfg.model
+          })
+        })
+        if (!res.ok) throw new Error(`sarvam ai error: ${res.status}`)
+        const json = await res.json()
+        // Format of response depends on exact sarvam AI API. Guessing common structure.
+        aiResponse = typeof json.response === 'string' ? json.response : JSON.stringify(json)
+      } else {
+        throw new Error(`ai_generate: unsupported provider ${cfg.provider}`)
+      }
+      
+      args.context.vars = { ...(args.context.vars || {}), ai_response: aiResponse }
+      return `ai_generate: completed with ${cfg.provider}`
     }
 
     default:

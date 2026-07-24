@@ -217,16 +217,14 @@ export function MessageThread({
 
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
-    if (!messages.length) return { expired: false, remaining: "" };
+    if (!messages.length) return { expired: true, remaining: "No messages" };
 
-    // Find last customer message
-    const lastCustomerMsg = [...messages]
-      .reverse()
-      .find((m) => m.sender_type === "customer");
+    // Find absolute last message (inbound or outbound)
+    const lastMsg = messages[messages.length - 1];
 
-    if (!lastCustomerMsg) return { expired: true, remaining: "No customer messages" };
+    if (!lastMsg) return { expired: true, remaining: "No messages" };
 
-    const hoursSince = differenceInHours(new Date(), new Date(lastCustomerMsg.created_at));
+    const hoursSince = differenceInHours(new Date(), new Date(lastMsg.created_at));
     const expired = hoursSince >= 24;
 
     if (expired) {
@@ -898,6 +896,18 @@ export function MessageThread({
               <RefreshCw
                 className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")}
               />
+            </button>
+          )}
+
+          {conversation.status === "pending" && (
+            <button
+              type="button"
+              onClick={() => handleStatusChange("open")}
+              className="inline-flex h-7 items-center justify-center gap-1 rounded-md bg-amber-500/10 px-2 text-xs font-medium text-amber-500 transition-colors hover:bg-amber-500/20"
+              title="Mark as resolved (move to Open)"
+            >
+              <Check className="h-3 w-3" />
+              Resolve
             </button>
           )}
 

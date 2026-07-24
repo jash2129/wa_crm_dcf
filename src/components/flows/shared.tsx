@@ -28,6 +28,9 @@ import {
   Tag,
   UserPlus,
   Workflow,
+  Bot,
+  BrainCircuit,
+  Globe,
 } from "lucide-react";
 
 // ============================================================
@@ -48,6 +51,9 @@ export type NodeType =
   | "condition"
   | "set_tag"
   | "handoff"
+  | "ai_reply"
+  | "http_fetch"
+  | "ai_intent"
   | "end";
 
 export interface BuilderNode {
@@ -109,6 +115,21 @@ export const NODE_META: Record<
     label: "Handoff to agent",
     icon: UserPlus,
     color: "text-amber-400",
+  },
+  ai_reply: {
+    label: "AI Reply",
+    icon: Bot,
+    color: "text-purple-400",
+  },
+  http_fetch: {
+    label: "API Request",
+    icon: Globe,
+    color: "text-orange-400",
+  },
+  ai_intent: {
+    label: "AI Intent Route",
+    icon: BrainCircuit,
+    color: "text-purple-500",
   },
   end: { label: "End", icon: Flag, color: "text-muted-foreground" },
 };
@@ -251,5 +272,7 @@ export function summarizeNode(node: BuilderNode): string | null {
       const note = typeof cfg.note === "string" ? cfg.note : "";
       return note.length > 0 ? truncate(note) : null;
     }
+    default:
+      return null;
   }
 }

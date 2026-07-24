@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { formatCurrency } from '@/lib/currency';
@@ -33,6 +34,7 @@ import {
   Save,
   X,
   DollarSign,
+  MessageSquare,
 } from 'lucide-react';
 
 interface ContactDetailViewProps {
@@ -49,6 +51,7 @@ export function ContactDetailView({
   onUpdated,
 }: ContactDetailViewProps) {
   const supabase = createClient();
+  const router = useRouter();
   const { accountId, defaultCurrency } = useAuth();
 
   const [contact, setContact] = useState<Contact | null>(null);
@@ -102,6 +105,27 @@ export function ContactDetailView({
     }
     setLoading(false);
   }, [contactId, supabase]);
+
+  const handleMessage = useCallback(async () => {
+    if (!contactId) return;
+    try {
+      const res = await fetch('/api/conversations/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contactId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to init conversation');
+      }
+      if (data.conversationId) {
+        onOpenChange(false); // Close the sheet
+        router.push(`/inbox?c=${data.conversationId}`);
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to init conversation');
+    }
+  }, [contactId, router, onOpenChange]);
 
   const fetchTags = useCallback(async () => {
     if (!contactId) return;
@@ -340,9 +364,10 @@ export function ContactDetailView({
         ) : (
           <div className="flex flex-col h-full">
             {/* Header */}
-            <SheetHeader className="p-4 border-b border-border/50">
-              <div className="flex items-center gap-3">
-                <Avatar className="size-12 bg-muted border border-border">
+            <SheetHeader className="p-4 pr-12 border-b border-border/50">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div className="flex items-center gap-3 overflow-hidden">
+                  <Avatar className="size-12 shrink-0 bg-muted border border-border">
                   <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
                     {getInitials(contact.name)}
                   </AvatarFallback>
@@ -381,6 +406,11 @@ export function ContactDetailView({
                     )}
                   </div>
                 </div>
+                </div>
+                <Button size="sm" onClick={handleMessage} className="shrink-0 gap-2 w-full sm:w-auto">
+                  <MessageSquare className="size-4" />
+                  Message
+                </Button>
               </div>
             </SheetHeader>
 
@@ -449,7 +479,7 @@ export function ContactDetailView({
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-muted-foreground text-xs">Company</Label>
+                    <Label className="text-muted-foreground text-xs">Services</Label>
                     <Input
                       value={editCompany}
                       onChange={(e) => setEditCompany(e.target.value)}

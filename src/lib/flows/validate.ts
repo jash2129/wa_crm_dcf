@@ -701,6 +701,117 @@ function validateNode(
       break;
     }
 
+    case "ai_reply": {
+      const cfg = node.config as {
+        provider?: "openai" | "openrouter";
+        system_prompt?: string;
+        model?: string;
+        fallback_node_key?: string;
+        next_node_key?: string;
+      };
+      if (!cfg.provider || !["openai", "openrouter"].includes(cfg.provider)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "provider",
+          message: "AI Reply needs a valid provider (openai or openrouter).",
+        });
+      }
+      if (!cfg.system_prompt?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "system_prompt",
+          message: "AI Reply needs a system prompt.",
+        });
+      }
+      if (!cfg.model?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "model",
+          message: "AI Reply needs a model selection.",
+        });
+      }
+      for (const branch of ["fallback_node_key", "next_node_key"] as const) {
+        const key = cfg[branch];
+        if (!key) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: branch,
+            message: `AI Reply needs a node for the "${branch === "next_node_key" ? "success" : "fallback"}" branch.`,
+          });
+        } else if (!knownKeys.has(key)) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: branch,
+            message: `AI Reply's "${branch}" points to non-existent node "${key}".`,
+          });
+        }
+      }
+      break;
+    }
+
+    case "ai_intent": {
+      const cfg = node.config as {
+        branches?: Array<{ next_node_key?: string }>;
+        fallback_node_key?: string;
+      };
+      for (const b of cfg.branches ?? []) {
+        if (b.next_node_key && !knownKeys.has(b.next_node_key)) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            message: `AI Intent points to non-existent node "${b.next_node_key}".`,
+          });
+        }
+      }
+      if (cfg.fallback_node_key && !knownKeys.has(cfg.fallback_node_key)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "fallback_node_key",
+          message: `AI Intent fallback points to non-existent node "${cfg.fallback_node_key}".`,
+        });
+      }
+      break;
+    }
+
+    case "http_fetch": {
+      const cfg = node.config as {
+        next_node_key?: string;
+        fallback_node_key?: string;
+      };
+      if (cfg.next_node_key && !knownKeys.has(cfg.next_node_key)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: `API Request points to non-existent node "${cfg.next_node_key}".`,
+        });
+      }
+      if (cfg.fallback_node_key && !knownKeys.has(cfg.fallback_node_key)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "fallback_node_key",
+          message: `API Request error path points to non-existent node "${cfg.fallback_node_key}".`,
+        });
+      }
+      break;
+    }
+
     case "handoff":
     case "end":
       // Terminal nodes have no outgoing edges; nothing to validate
@@ -755,6 +866,16 @@ function outgoingEdges(node: NodeInput): string[] {
       const cfg = node.config as { next_node_key?: string };
       return cfg.next_node_key ? [cfg.next_node_key] : [];
     }
+    case "ai_reply": {
+      const cfg = node.config as {
+        next_node_key?: string;
+        fallback_node_key?: string;
+      };
+      const out: string[] = [];
+      if (cfg.next_node_key) out.push(cfg.next_node_key);
+      if (cfg.fallback_node_key) out.push(cfg.fallback_node_key);
+      return out;
+    }
     case "condition": {
       const cfg = node.config as {
         true_next?: string;
@@ -783,6 +904,28 @@ function outgoingEdges(node: NodeInput): string[] {
           if (r.next_node_key) out.push(r.next_node_key);
         }
       }
+      return out;
+    }
+    case "ai_intent": {
+      const cfg = node.config as {
+        branches?: Array<{ next_node_key?: string }>;
+        fallback_node_key?: string;
+      };
+      const out: string[] = [];
+      for (const b of cfg.branches ?? []) {
+        if (b.next_node_key) out.push(b.next_node_key);
+      }
+      if (cfg.fallback_node_key) out.push(cfg.fallback_node_key);
+      return out;
+    }
+    case "http_fetch": {
+      const cfg = node.config as {
+        next_node_key?: string;
+        fallback_node_key?: string;
+      };
+      const out: string[] = [];
+      if (cfg.next_node_key) out.push(cfg.next_node_key);
+      if (cfg.fallback_node_key) out.push(cfg.fallback_node_key);
       return out;
     }
     case "handoff":

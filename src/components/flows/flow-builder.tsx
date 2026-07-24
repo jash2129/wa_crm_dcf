@@ -568,6 +568,9 @@ function AddNodeButton({ onAdd }: { onAdd: (type: NodeType) => void }) {
     "condition",
     "set_tag",
     "handoff",
+    "http_fetch",
+    "ai_reply",
+    "ai_intent",
     "end",
   ];
   return (

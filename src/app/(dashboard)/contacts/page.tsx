@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import type { Contact, Tag, ContactTag } from '@/types';
@@ -45,6 +46,9 @@ import {
   Mail,
   Copy,
   Check,
+  MessageSquare,
+  RefreshCw,
+  Filter,
 } from 'lucide-react';
 import { ContactForm } from '@/components/contacts/contact-form';
 import { ContactDetailView } from '@/components/contacts/contact-detail-view';
@@ -68,8 +72,10 @@ export default function ContactsPage() {
   const [contacts, setContacts] = useState<ContactWithTags[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [filterTagId, setFilterTagId] = useState<string | 'all'>('all');
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+  const router = useRouter();
 
   // Modals
   const [formOpen, setFormOpen] = useState(false);
@@ -101,6 +107,28 @@ export default function ContactsPage() {
     }
   }, []);
 
+  const handleMessage = useCallback(async (contactId: string) => {
+    try {
+      const res = await fetch('/api/conversations/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contactId }),
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to initialize conversation');
+      }
+      
+      if (data.conversationId) {
+        router.push(`/inbox?c=${data.conversationId}`);
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to initialize conversation');
+    }
+  }, [router]);
+
   // All tags for display
   const [tagsMap, setTagsMap] = useState<Record<string, Tag>>({});
 
@@ -129,12 +157,22 @@ export default function ContactsPage() {
       .order('created_at', { ascending: false })
       .range(from, to);
 
+    let filteredQuery = supabase
+      .from('contacts')
+      .select('*, contact_tags!inner(tag_id)', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(from, to)
+      .eq('contact_tags.tag_id', filterTagId);
+
+    // @ts-ignore - TS complains about conditional query builder assignments
+    let activeQuery = filterTagId === 'all' ? query : filteredQuery;
+
     if (search.trim()) {
       const term = `%${search.trim()}%`;
-      query = query.or(`name.ilike.${term},phone.ilike.${term},email.ilike.${term}`);
+      activeQuery = activeQuery.or(`name.ilike.${term},phone.ilike.${term},email.ilike.${term}`);
     }
 
-    const { data, count, error } = await query;
+    const { data, count, error } = await activeQuery;
 
     if (error) {
       toast.error('Failed to load contacts');
@@ -172,7 +210,7 @@ export default function ContactsPage() {
 
     setContacts(enriched);
     setLoading(false);
-  }, [supabase, page, search, tagsMap]);
+  }, [supabase, page, search, tagsMap, filterTagId]);
 
   // Load-once-on-mount-ish data fetches. Each setter inside runs
   // inside an async promise completion (Supabase await), not
@@ -294,6 +332,16 @@ export default function ContactsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={fetchContacts}
+            disabled={loading}
+            className="border-border text-muted-foreground hover:bg-muted shrink-0"
+            title="Refresh contacts"
+          >
+            <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
           {canEditSettings && (
             <Button
               variant="outline"
@@ -326,20 +374,50 @@ export default function ContactsPage() {
         </div>
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            // Reset pagination when the query changes — the result
-            // set shrinks/grows, page N may no longer be valid.
-            setPage(0);
-          }}
-          placeholder="Search by name, phone, or email..."
-          className="pl-8 bg-card border-border text-foreground placeholder:text-muted-foreground"
-        />
+      {/* Search and Filters */}
+      <div className="flex flex-col sm:flex-row gap-4 items-center">
+        <div className="relative max-w-sm w-full">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              // Reset pagination when the query changes — the result
+              // set shrinks/grows, page N may no longer be valid.
+              setPage(0);
+            }}
+            placeholder="Search by name, phone, or email..."
+            className="pl-8 bg-card border-border text-foreground placeholder:text-muted-foreground"
+          />
+        </div>
+        
+        <DropdownMenu>
+          <DropdownMenuTrigger 
+            render={
+              <Button variant="outline" className={`border-border gap-2 w-full sm:w-auto ${filterTagId !== 'all' ? 'text-primary border-primary/50 bg-primary/5 hover:bg-primary/10' : 'text-muted-foreground hover:bg-muted'}`} />
+            }
+          >
+            <Filter className="size-4" />
+            {filterTagId === 'all' ? 'Filter by Tag' : tagsMap[filterTagId]?.name || 'Unknown Tag'}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem onClick={() => { setFilterTagId('all'); setPage(0); }} className={filterTagId === 'all' ? 'bg-muted' : ''}>
+              All Contacts
+            </DropdownMenuItem>
+            {Object.values(tagsMap).map((tag) => (
+              <DropdownMenuItem 
+                key={tag.id} 
+                onClick={() => { setFilterTagId(tag.id); setPage(0); }}
+                className={filterTagId === tag.id ? 'bg-muted flex items-center justify-between' : 'flex items-center justify-between'}
+              >
+                <div className="flex items-center gap-2">
+                  <div className="size-2 rounded-full" style={{ backgroundColor: tag.color }} />
+                  {tag.name}
+                </div>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Bulk action bar */}
@@ -415,17 +493,19 @@ export default function ContactsPage() {
                   <TableHead className="text-muted-foreground">Name</TableHead>
                   <TableHead className="text-muted-foreground">Phone</TableHead>
                   <TableHead className="text-muted-foreground hidden md:table-cell">Email</TableHead>
-                  <TableHead className="text-muted-foreground hidden lg:table-cell">Company</TableHead>
+                  <TableHead className="text-muted-foreground hidden lg:table-cell">Services</TableHead>
                   <TableHead className="text-muted-foreground hidden md:table-cell">Tags</TableHead>
                   <TableHead className="text-muted-foreground hidden lg:table-cell">Created</TableHead>
                   <TableHead className="text-muted-foreground w-12" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {contacts.map((contact) => (
+                {contacts.map((contact) => {
+                  const isNew = contact.created_at === contact.updated_at;
+                  return (
                   <TableRow
                     key={contact.id}
-                    className="border-border hover:bg-muted/50 cursor-pointer"
+                    className={`border-border hover:bg-muted/50 cursor-pointer ${isNew ? 'bg-primary/5 dark:bg-primary/10' : ''}`}
                     onClick={() => openDetail(contact.id)}
                   >
                     <TableCell onClick={(e) => e.stopPropagation()}>
@@ -436,7 +516,10 @@ export default function ContactsPage() {
                       />
                     </TableCell>
                     <TableCell className="text-foreground font-medium">
-                      {contact.name || <span className="text-muted-foreground italic">Unnamed</span>}
+                      <div className="flex items-center gap-2">
+                        {contact.name || <span className="text-muted-foreground italic">Unnamed</span>}
+                        {isNew && <span className="text-[10px] leading-none uppercase font-bold bg-primary text-primary-foreground px-1.5 py-0.5 rounded-sm">New</span>}
+                      </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground font-mono text-xs">
                       {contact.phone}
@@ -500,6 +583,16 @@ export default function ContactsPage() {
                           <DropdownMenuItem
                             onClick={(e) => {
                               e.stopPropagation();
+                              handleMessage(contact.id);
+                            }}
+                            className="text-popover-foreground focus:bg-muted focus:text-foreground"
+                          >
+                            <MessageSquare className="size-4" />
+                            Message
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
                               openEditForm(contact);
                             }}
                             className="text-popover-foreground focus:bg-muted focus:text-foreground"
@@ -522,7 +615,8 @@ export default function ContactsPage() {
                       </DropdownMenu>
                     </TableCell>
                   </TableRow>
-                ))}
+                );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -530,6 +624,7 @@ export default function ContactsPage() {
           {/* Mobile Card List View */}
           <div className="block md:hidden space-y-3">
             {contacts.map((contact) => {
+              const isNew = contact.created_at === contact.updated_at;
               const initials = (contact.name || "Customer")
                 .split(" ")
                 .map((n) => n[0])
@@ -541,8 +636,13 @@ export default function ContactsPage() {
                 <div
                   key={contact.id}
                   onClick={() => openDetail(contact.id)}
-                  className="rounded-xl border border-border bg-card p-4 space-y-3 hover:bg-muted/40 transition-all cursor-pointer relative"
+                  className={`rounded-xl border bg-card p-4 space-y-3 hover:bg-muted/40 transition-all cursor-pointer relative ${isNew ? 'border-primary/50 bg-primary/5 dark:bg-primary/10' : 'border-border'}`}
                 >
+                  {isNew && (
+                    <div className="absolute top-0 right-0 -mt-2 -mr-2">
+                       <span className="text-[10px] leading-none uppercase font-bold bg-primary text-primary-foreground px-2 py-1 rounded-full shadow-sm border border-background">New</span>
+                    </div>
+                  )}
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3">
                       {/* Checkbox */}
@@ -559,7 +659,7 @@ export default function ContactsPage() {
                         {initials}
                       </div>
 
-                      {/* Name & Company */}
+                      {/* Name & Services */}
                       <div className="min-w-0">
                         <h3 className="font-semibold text-foreground text-sm truncate">
                           {contact.name || <span className="text-muted-foreground italic">Unnamed</span>}
@@ -590,6 +690,16 @@ export default function ContactsPage() {
                           align="end"
                           className="bg-popover border-border"
                         >
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleMessage(contact.id);
+                            }}
+                            className="text-popover-foreground focus:bg-muted focus:text-foreground"
+                          >
+                            <MessageSquare className="size-4" />
+                            Message
+                          </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => openEditForm(contact)}
                             className="text-popover-foreground focus:bg-muted focus:text-foreground"

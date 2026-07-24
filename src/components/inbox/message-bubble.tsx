@@ -412,7 +412,6 @@ function MessageContent({ message }: { message: Message }) {
               url={message.media_url}
               type="image"
               filename={filename}
-              messageId={message.id}
             >
               <MediaImage url={message.media_url} alt="Shared image" />
             </MediaWrapper>
@@ -439,7 +438,6 @@ function MessageContent({ message }: { message: Message }) {
               url={message.media_url}
               type="video"
               filename={filename}
-              messageId={message.id}
             >
               <video
                 src={message.media_url}
@@ -475,7 +473,7 @@ function MessageContent({ message }: { message: Message }) {
                     ? "text-primary-foreground/80 hover:bg-primary-foreground/10 hover:text-primary-foreground"
                     : "text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
                 )}
-                onClick={() => handleDownload(message.media_url!, filename, message.id)}
+                onClick={() => handleDownload(message.media_url!, filename)}
                 title="Download Audio"
               >
                 <Download className="h-4 w-4" />
@@ -501,7 +499,7 @@ function MessageContent({ message }: { message: Message }) {
             rel="noopener noreferrer"
             onClick={(e) => {
               e.preventDefault();
-              handleDownload(message.media_url!, filename, message.id);
+              handleDownload(message.media_url!, filename);
             }}
             className={cn(
               "flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors w-full max-w-60 min-w-40 border",

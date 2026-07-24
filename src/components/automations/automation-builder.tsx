@@ -30,6 +30,7 @@ import {
   Loader2,
   ArrowDown,
   ArrowUp,
+  Sparkles,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -80,14 +81,14 @@ export interface BuilderInitial {
 // Step metadata — one source of truth for icon + label + border color
 // ------------------------------------------------------------
 
-interface StepMeta {
+export interface StepMeta {
   label: string
   icon: typeof Zap
   /** Left-border accent color per spec. */
   border: string
 }
 
-const STEP_META: Record<AutomationStepType, StepMeta> = {
+export const STEP_META: Record<AutomationStepType, StepMeta> = {
   send_message: { label: "Send Message", icon: MessageSquare, border: "border-l-primary" },
   send_template: { label: "Send Template", icon: FileText, border: "border-l-primary" },
   add_tag: { label: "Add Tag", icon: Tag, border: "border-l-primary" },
@@ -99,9 +100,10 @@ const STEP_META: Record<AutomationStepType, StepMeta> = {
   condition: { label: "Condition (If/Else)", icon: GitBranch, border: "border-l-amber-500" },
   send_webhook: { label: "Send Webhook", icon: Webhook, border: "border-l-primary" },
   close_conversation: { label: "Close Conversation", icon: CircleSlash, border: "border-l-primary" },
+  ai_generate: { label: "AI Generate", icon: Sparkles, border: "border-l-purple-500" },
 }
 
-const ADDABLE_STEPS: AutomationStepType[] = [
+export const ADDABLE_STEPS: AutomationStepType[] = [
   "send_message",
   "send_template",
   "add_tag",
@@ -113,6 +115,7 @@ const ADDABLE_STEPS: AutomationStepType[] = [
   "condition",
   "send_webhook",
   "close_conversation",
+  "ai_generate",
 ]
 
 const TRIGGER_OPTIONS: { value: AutomationTriggerType; label: string; hint: string }[] = [
@@ -129,7 +132,7 @@ const TRIGGER_OPTIONS: { value: AutomationTriggerType; label: string; hint: stri
   { value: "time_based", label: "Time-Based", hint: "On a recurring schedule" },
 ]
 
-function cid(): string {
+export function cid(): string {
   return (
     "c_" +
     (typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -138,7 +141,7 @@ function cid(): string {
   )
 }
 
-function blankConfig(type: AutomationStepType): Record<string, unknown> {
+export function blankConfig(type: AutomationStepType): Record<string, unknown> {
   switch (type) {
     case "send_message":
       return { text: "" }
@@ -161,6 +164,8 @@ function blankConfig(type: AutomationStepType): Record<string, unknown> {
       return { url: "", headers: {}, body_template: "" }
     case "close_conversation":
       return {}
+    case "ai_generate":
+      return { provider: "openai", model: "gpt-4o", system_prompt: "You are a helpful assistant.", prompt: "{{ message.text }}" }
     default:
       return {}
   }
@@ -1027,7 +1032,7 @@ function AddButton({ onPick }: { onPick: (t: AutomationStepType) => void }) {
 // Per-step config editor
 // ------------------------------------------------------------
 
-function StepEditor({
+export function StepEditor({
   step,
   onChange,
 }: {
@@ -1236,12 +1241,72 @@ function StepEditor({
           Sets the conversation status to &quot;closed&quot;. No configuration needed.
         </p>
       )
+    case "ai_generate":
+      return (
+        <>
+          <FieldBlock label="Provider">
+            <select
+              value={(cfg.provider as string) ?? "openai"}
+              onChange={(e) => set({ provider: e.target.value })}
+              className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"
+            >
+              <option value="openai">OpenAI</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="sarvam">Sarvam AI</option>
+            </select>
+          </FieldBlock>
+          <FieldBlock label="Model">
+            <Input
+              value={(cfg.model as string) ?? ""}
+              onChange={(e) => set({ model: e.target.value })}
+              placeholder="e.g. gpt-4o"
+              className="bg-muted text-foreground"
+            />
+          </FieldBlock>
+          <FieldBlock label="System Prompt">
+            <Textarea
+              value={(cfg.system_prompt as string) ?? ""}
+              onChange={(e) => set({ system_prompt: e.target.value })}
+              className="min-h-16 bg-muted text-foreground"
+            />
+          </FieldBlock>
+          <FieldBlock label="Prompt">
+            <Textarea
+              value={(cfg.prompt as string) ?? ""}
+              onChange={(e) => set({ prompt: e.target.value })}
+              className="min-h-16 bg-muted text-foreground"
+            />
+          </FieldBlock>
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-sm font-medium">Conversational Memory</span>
+            <Switch
+              checked={!!cfg.with_memory}
+              onCheckedChange={(c) => set({ with_memory: c })}
+            />
+          </div>
+          {cfg.with_memory && (
+            <FieldBlock label="Message History Limit">
+              <Input
+                type="number"
+                min={1}
+                max={50}
+                value={(cfg.memory_limit as number) ?? 10}
+                onChange={(e) => set({ memory_limit: parseInt(e.target.value) || 10 })}
+                className="bg-muted text-foreground"
+              />
+            </FieldBlock>
+          )}
+          <div className="mt-2 text-xs text-muted-foreground">
+            The response is saved to <code>{"{{ vars.ai_response }}"}</code>.
+          </div>
+        </>
+      )
     default:
       return null
   }
 }
 
-function FieldBlock({
+export function FieldBlock({
   label,
   children,
 }: {
@@ -1256,7 +1321,7 @@ function FieldBlock({
   )
 }
 
-function previewFor(step: BuilderStep): string {
+export function previewFor(step: BuilderStep): string {
   switch (step.step_type) {
     case "send_message":
       return (step.step_config.text as string) || "no text yet"

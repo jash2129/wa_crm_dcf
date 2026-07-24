@@ -18,6 +18,7 @@ import {
   Square,
   X,
   Loader2,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
@@ -149,6 +150,7 @@ export function MessageComposer({
   // (opus-recorder) so there's no server-side transcode.
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
+  const [aiSuggesting, setAiSuggesting] = useState(false);
   const recorderRef = useRef<import("opus-recorder").default | null>(null);
   const cancelledRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -222,6 +224,25 @@ export function MessageComposer({
     },
     [adjustHeight]
   );
+
+  const handleAiSuggest = useCallback(async () => {
+    if (sessionExpired || aiSuggesting) return;
+    setAiSuggesting(true);
+    try {
+      const res = await fetch(`/api/whatsapp/conversations/${conversationId}/ai-suggest`, {
+        method: "POST"
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to generate AI suggestion");
+      setText(data.suggestion);
+      // Wait for React to apply text, then resize box
+      setTimeout(adjustHeight, 0);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to generate AI suggestion");
+    } finally {
+      setAiSuggesting(false);
+    }
+  }, [conversationId, sessionExpired, aiSuggesting, adjustHeight]);
 
   // Upload a captured file to chat-media and stage it as a draft.
   const stageUpload = useCallback(
@@ -388,22 +409,7 @@ export function MessageComposer({
           />
         </div>
       )}
-      {sessionExpired && (
-        <div className="mb-2 flex items-center justify-between rounded-lg bg-amber-500/10 px-3 py-2">
-          <p className="text-xs text-amber-400">
-            24-hour session expired. Use a template to re-engage.
-          </p>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs text-amber-400 hover:text-amber-300"
-            onClick={onOpenTemplates}
-          >
-            <LayoutTemplate className="mr-1 h-3 w-3" />
-            Templates
-          </Button>
-        </div>
-      )}
+
 
       {/* Hidden file inputs driven by the attach menu. */}
       <input
@@ -437,7 +443,17 @@ export function MessageComposer({
         }}
       />
 
-      {draft ? (
+      {sessionExpired ? (
+        <GatedButton
+          canAct={!readOnly}
+          gateReason="send messages"
+          onClick={onOpenTemplates}
+          className="w-full h-12 flex items-center justify-center gap-2 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
+        >
+          <LayoutTemplate className="size-5" />
+          <span className="font-medium">Send Template to Re-engage</span>
+        </GatedButton>
+      ) : draft ? (
         <MediaDraftPreview
           draft={draft}
           busy={busy}
@@ -523,6 +539,22 @@ export function MessageComposer({
             <LayoutTemplate className="h-4 w-4" />
           </GatedButton>
 
+          <GatedButton
+            variant="ghost"
+            size="sm"
+            canAct={!readOnly}
+            gateReason="send messages"
+            disabled={sessionExpired || aiSuggesting}
+            title={readOnly ? undefined : "Generate AI Reply"}
+            className={cn(
+              "h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-purple-500",
+              aiSuggesting && "animate-pulse text-purple-500"
+            )}
+            onClick={handleAiSuggest}
+          >
+            {aiSuggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          </GatedButton>
+
           <textarea
             ref={textareaRef}
             value={text}
@@ -563,7 +595,7 @@ export function MessageComposer({
       {/* Hint sits outside the flex row so its height doesn't push
           `items-end` buttons below the textarea. Indented to line up
           under the textarea left edge. */}
-      {!draft && !recording && (
+      {!sessionExpired && !draft && !recording && (
         <p className="mt-1 pl-[5.5rem] text-[10px] text-muted-foreground">
           Type &apos;/&apos; for quick replies
         </p>

@@ -388,7 +388,8 @@ export type AutomationStepType =
   | 'wait'
   | 'condition'
   | 'send_webhook'
-  | 'close_conversation';
+  | 'close_conversation'
+  | 'ai_generate';
 
 export type AutomationLogStatus = 'success' | 'partial' | 'failed';
 
@@ -479,6 +480,15 @@ export interface SendWebhookStepConfig {
   body_template?: string;
 }
 
+export interface AiGenerateStepConfig {
+  provider: 'openai' | 'openrouter' | 'sarvam';
+  model: string;
+  system_prompt: string;
+  prompt: string;
+  with_memory?: boolean;
+  memory_limit?: number;
+}
+
 export type AutomationStepConfig =
   | SendMessageStepConfig
   | SendTemplateStepConfig
@@ -489,6 +499,7 @@ export type AutomationStepConfig =
   | WaitStepConfig
   | ConditionStepConfig
   | SendWebhookStepConfig
+  | AiGenerateStepConfig
   | Record<string, never>
   | Record<string, unknown>;
 
@@ -528,6 +539,39 @@ export interface AutomationLogStepResult {
   step_type: AutomationStepType;
   status: 'success' | 'skipped' | 'failed';
   detail?: string;
+}
+
+// ============================================================
+// Bots
+// ============================================================
+
+export interface Bot {
+  id: string;
+  account_id: string;
+  name: string;
+  description?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BotNode {
+  id: string;
+  bot_id: string;
+  node_type: string;
+  config: Record<string, unknown>;
+  position_x: number;
+  position_y: number;
+  created_at: string;
+}
+
+export interface BotEdge {
+  id: string;
+  bot_id: string;
+  source_node_id: string;
+  target_node_id: string;
+  source_handle?: string | null;
+  created_at: string;
 }
 
 export interface AutomationLog {

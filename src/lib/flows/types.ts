@@ -107,6 +107,28 @@ export interface HandoffNodeConfig {
   assign_to?: string;
 }
 
+export interface AIIntentBranch {
+  /** The specific intent label (e.g. 'Sales', 'Support') */
+  intent: string;
+  /** Description for the LLM to understand what this intent means */
+  description: string;
+  /** Node to advance to if this intent is matched */
+  next_node_key: string;
+}
+
+export interface AIIntentNodeConfig {
+  /** AI Provider (same as ai_reply) */
+  provider: "openai" | "openrouter" | "sarvam" | "cohere";
+  /** Exact model name (e.g., gpt-4o-mini) */
+  model: string;
+  /** Overall context or prompt for the classifier */
+  system_prompt: string;
+  /** Available intents to classify into */
+  branches: AIIntentBranch[];
+  /** Where to go if classification fails or the LLM outputs garbage */
+  fallback_node_key: string;
+}
+
 /**
  * Captures the customer's next free-text reply into
  * `flow_runs.vars[var_key]`, then advances.
@@ -116,6 +138,25 @@ export interface HandoffNodeConfig {
  * builder still surfaces the field so users can author flows that
  * v2 will start enforcing.
  */
+export interface HttpFetchNodeConfig {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  /** URL to fetch. Supports interpolation (e.g. https://api.example.com/users/{{vars.id}}) */
+  url: string;
+  /** Key-Value pairs for headers (e.g. Authorization: Bearer ...) */
+  headers?: Record<string, string>;
+  /** JSON payload. Supports interpolation. */
+  body?: string;
+  /**
+   * Key under which to store the JSON response in `flow_runs.vars`.
+   * For example, if var_key is 'api_data', downstream nodes can use {{vars.api_data.id}}.
+   */
+  var_key?: string;
+  /** Node to advance to on success (2xx HTTP status). */
+  next_node_key: string;
+  /** Node to advance to if fetch fails (network error, timeout, or 4xx/5xx status). */
+  fallback_node_key: string;
+}
+
 export interface CollectInputNodeConfig {
   /** Prompt text sent to the customer before they reply. */
   prompt_text: string;
@@ -176,6 +217,23 @@ export interface SetTagNodeConfig {
 // Terminal nodes carry no config — they just stop the run.
 export type EndNodeConfig = Record<string, never>;
 
+export interface AIReplyNodeConfig {
+  /** The provider to use (e.g. openai, openrouter). */
+  provider: "openai" | "openrouter";
+  /** The system prompt to instruct the LLM. */
+  system_prompt: string;
+  /** The model to use (e.g. gpt-4o, claude-3.5-sonnet). */
+  model: string;
+  /** Temperature for the model (0.0 to 1.0). */
+  temperature: number;
+  /** Node to advance to if the LLM fails or returns low confidence. */
+  fallback_node_key: string;
+  /** Node to advance to on a successful LLM response. */
+  next_node_key: string;
+  /** Optional Knowledge Base ID to use for RAG. */
+  kb_id?: string;
+}
+
 /**
  * Total union — every concrete node_type the v1 engine understands.
  * Add new node types here and the engine's switch will flag missing
@@ -194,7 +252,10 @@ export type FlowNodeConfig =
   | { node_type: "condition"; config: ConditionNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }
   | { node_type: "handoff"; config: HandoffNodeConfig }
-  | { node_type: "end"; config: EndNodeConfig };
+  | { node_type: "http_fetch"; config: HttpFetchNodeConfig }
+  | { node_type: "end"; config: EndNodeConfig }
+  | { node_type: "ai_reply"; config: AIReplyNodeConfig }
+  | { node_type: "ai_intent"; config: AIIntentNodeConfig };
 
 export type FlowNodeType = FlowNodeConfig["node_type"];
 

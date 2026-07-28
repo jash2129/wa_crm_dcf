@@ -27,12 +27,11 @@ export async function GET(
   const user = await requireUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const admin = supabaseAdmin()
-  const { data: automation, error } = await admin
+  const supabase = await createClient()
+  const { data: automation, error } = await supabase
     .from('automations')
     .select('*')
     .eq('id', id)
-    .eq('user_id', user.id)
     .maybeSingle()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -53,16 +52,18 @@ export async function PATCH(
   const body = await request.json().catch(() => null)
   if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
 
-  const admin = supabaseAdmin()
+  const supabase = await createClient()
 
   // Ownership check before we touch anything. Load the fields we need
   // to compute the post-patch "effective" state for validation.
-  const { data: existing } = await admin
+  // The regular supabase client uses RLS to ensure only account members
+  // can fetch this row.
+  const { data: existing } = await supabase
     .from('automations')
     .select('id, user_id, is_active, trigger_type, trigger_config')
     .eq('id', id)
     .maybeSingle()
-  if (!existing || existing.user_id !== user.id) {
+  if (!existing) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
@@ -105,7 +106,7 @@ export async function PATCH(
   }
 
   if (Object.keys(update).length > 0) {
-    const { error: updErr } = await admin
+    const { error: updErr } = await supabase
       .from('automations')
       .update(update)
       .eq('id', id)
@@ -128,11 +129,11 @@ export async function DELETE(
   const user = await requireUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { error } = await supabaseAdmin()
+  const supabase = await createClient()
+  const { error } = await supabase
     .from('automations')
     .delete()
     .eq('id', id)
-    .eq('user_id', user.id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
 }

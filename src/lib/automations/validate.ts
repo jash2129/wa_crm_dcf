@@ -135,6 +135,17 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
     case 'close_conversation':
       // No config required.
       break
+    case 'ai_generate':
+      if (!nonEmpty(c.provider)) {
+        issues.push({ path: `${path}.provider`, message: 'provider is required' })
+      }
+      if (!nonEmpty(c.model)) {
+        issues.push({ path: `${path}.model`, message: 'model is required' })
+      }
+      if (!nonEmpty(c.prompt)) {
+        issues.push({ path: `${path}.prompt`, message: 'prompt is required' })
+      }
+      break
     default:
       issues.push({ path, message: `unknown step type: ${step.step_type}` })
   }

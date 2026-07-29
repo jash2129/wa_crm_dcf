@@ -115,7 +115,7 @@ export default function TeamActionItemsPage() {
         </div>
 
         <div className="flex items-center gap-4 shrink-0">
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter} onValueChange={(val) => setStatusFilter(val || "all")}>
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Filter by status" />
             </SelectTrigger>
@@ -128,7 +128,7 @@ export default function TeamActionItemsPage() {
             </SelectContent>
           </Select>
 
-          <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+          <Select value={priorityFilter} onValueChange={(val) => setPriorityFilter(val || "all")}>
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Filter by priority" />
             </SelectTrigger>

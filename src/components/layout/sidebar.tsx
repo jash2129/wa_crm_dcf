@@ -213,7 +213,7 @@ export function Sidebar({ open = false, onClose, isCollapsed = false, onToggleCo
 
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-4">
-          <TooltipProvider delayDuration={0}>
+          <TooltipProvider delay={0}>
             <ul className="flex flex-col gap-1">
               {navItems.map((item) => {
                 if (item.href === "/team-action-items" && accountRole !== 'admin' && accountRole !== 'owner') {
@@ -290,7 +290,7 @@ export function Sidebar({ open = false, onClose, isCollapsed = false, onToggleCo
 
           <div className="my-4 border-t border-border" />
 
-          <TooltipProvider delayDuration={0}>
+          <TooltipProvider delay={0}>
             <ul className="flex flex-col gap-1">
               {bottomNavItems.map((item) => {
                 const isActive = pathname.startsWith(item.href);

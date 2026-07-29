@@ -148,7 +148,6 @@ export default function ActionItemsPage() {
               mode="single"
               selected={currentDate}
               onSelect={(date) => date && setCurrentDate(date)}
-              initialFocus
             />
           </PopoverContent>
         </Popover>

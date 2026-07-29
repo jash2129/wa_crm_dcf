@@ -188,7 +188,7 @@ export function TaskSheet({ task, open, onOpenChange, onUpdate, onDelete }: Task
               <Label className="px-1">Assign To</Label>
               <Select 
                 value={formData.assignee_id || user?.id || ""} 
-                onValueChange={(val) => setFormData({ ...formData, assignee_id: val })}
+                onValueChange={(val) => setFormData({ ...formData, assignee_id: val || undefined })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select team member" />

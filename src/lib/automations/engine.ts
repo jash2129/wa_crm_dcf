@@ -427,20 +427,31 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       if (!args.contactId) throw new Error('assign_conversation needs a contact')
       let agentId = cfg.agent_id
       if (cfg.mode === 'round_robin') {
-        // Pick any member of the account. The existing implementation
-        // only ever returned the automation's author; preserving that
-        // shape until a real round-robin algorithm replaces it.
+        // True Round Robin: fetch online members ordered by last_routed_at
         const { data: profiles } = await db
           .from('profiles')
           .select('user_id')
           .eq('account_id', args.automation.account_id)
+          .eq('agent_status', 'online')
+          .order('last_routed_at', { ascending: true, nullsFirst: true })
           .limit(1)
         agentId = profiles?.[0]?.user_id
+        
+        // Update the chosen agent's last_routed_at
+        if (agentId) {
+          await db
+            .from('profiles')
+            .update({ last_routed_at: new Date().toISOString() })
+            .eq('user_id', agentId)
+        }
       }
       if (!agentId) return 'no agent resolved'
       await db
         .from('conversations')
-        .update({ assigned_agent_id: agentId })
+        .update({ 
+          assigned_agent_id: agentId,
+          assigned_at: new Date().toISOString()
+        })
         .eq('account_id', args.automation.account_id)
         .eq('contact_id', args.contactId)
       return `assigned to ${agentId}`

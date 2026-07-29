@@ -165,6 +165,25 @@ describe("validateStepsForActivation", () => {
     ]);
   });
 
+  it("validates ai_generate required fields", () => {
+    const good = validateStepsForActivation([
+      {
+        step_type: "ai_generate",
+        step_config: { provider: "openai", model: "gpt-4", prompt: "Hello" },
+      },
+    ]);
+    expect(good).toEqual([]);
+
+    const missing = validateStepsForActivation([
+      { step_type: "ai_generate", step_config: {} },
+    ]);
+    expect(missing.map((i) => i.path)).toEqual([
+      "steps[0].provider",
+      "steps[0].model",
+      "steps[0].prompt",
+    ]);
+  });
+
   it("flags condition subject/operand independently", () => {
     const issues = validateStepsForActivation([
       { step_type: "condition", step_config: {} },

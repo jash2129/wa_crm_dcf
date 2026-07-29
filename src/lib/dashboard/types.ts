@@ -65,3 +65,14 @@ export interface ActivityItem {
   /** Optional deep-link for the whole row (not all items have a target). */
   href?: string
 }
+
+export interface AgentProductivityRow {
+  user_id: string
+  full_name: string
+  avatar_url?: string
+  agent_status: 'online' | 'away' | 'offline'
+  active_conversations: number
+  replies_sent: number
+  avg_response_minutes: number | null
+  avg_csat_score?: number | null
+}

@@ -35,6 +35,8 @@ export interface Profile {
    * `@/lib/auth/roles` rather than comparing this string directly.
    */
   account_role?: AccountRole;
+  agent_status: 'online' | 'away' | 'offline';
+  last_routed_at?: string;
   created_at: string;
 }
 
@@ -150,12 +152,15 @@ export interface Conversation {
   contact_id: string;
   status: ConversationStatus;
   assigned_agent_id?: string;
+  assigned_at?: string;
   last_message_text?: string;
   last_message_at?: string;
   unread_count: number;
   created_at: string;
   updated_at: string;
   contact?: Contact;
+  csat_score?: number | null;
+  csat_comment?: string | null;
 }
 
 export type SenderType = 'customer' | 'agent' | 'bot';
@@ -182,6 +187,7 @@ export interface Message {
   template_name?: string;
   message_id?: string;
   status: MessageStatus;
+  is_internal?: boolean;
   created_at: string;
   reply_to_message_id?: string;
   /**
@@ -246,6 +252,14 @@ export type TemplateButton =
   | { type: 'PHONE_NUMBER'; text: string; phone_number: string }
   | { type: 'COPY_CODE'; text: string; example: string };
 
+export interface CannedResponse {
+  id: string;
+  account_id: string;
+  shortcut: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
 export interface TemplateSampleValues {
   body?: string[];
   header?: string[];

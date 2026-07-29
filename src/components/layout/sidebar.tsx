@@ -6,13 +6,20 @@ import { useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Book,
   Bot,
+  BrainCircuit,
+  CheckSquare,
+  ChevronLeft,
+  ChevronRight,
   Crown,
   GitBranch,
+  Kanban,
   LayoutDashboard,
   LogOut,
+  Megaphone,
   MessageSquare,
   Radio,
   Settings,
@@ -93,10 +100,12 @@ const navItems: NavItem[] = [
   { href: "/inbox", label: "Inbox", icon: MessageSquare },
   { href: "/contacts", label: "Contacts", icon: Users },
   { href: "/pipelines", label: "Pipelines", icon: GitBranch },
-  { href: "/broadcasts", label: "Broadcasts", icon: Radio },
+  { href: "/broadcasts", label: "Broadcasts", icon: Megaphone },
+  { href: "/action-items", label: "My Action Items", icon: CheckSquare },
   { href: "/automations", label: "Automations", icon: Zap },
-  { href: "/flows", label: "Flows", icon: Workflow, beta: true },
-  { href: "/knowledge-bases", label: "Knowledge", icon: Book, beta: true },
+  { href: "/flows", label: "Flows", icon: Bot },
+  { href: "/team-action-items", label: "Team Action Items", icon: CheckSquare },
+  { href: "/knowledge-bases", label: "Knowledge", icon: BrainCircuit },
 ];
 
 const bottomNavItems = [
@@ -107,9 +116,11 @@ interface SidebarProps {
   /** Controlled on mobile by the Header's hamburger button. Ignored on lg+. */
   open?: boolean;
   onClose?: () => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
-export function Sidebar({ open = false, onClose }: SidebarProps) {
+export function Sidebar({ open = false, onClose, isCollapsed = false, onToggleCollapse }: SidebarProps) {
   const pathname = usePathname();
   const { profile, profileLoading, account, accountRole, signOut } = useAuth();
   const totalUnread = useTotalUnread();
@@ -170,22 +181,23 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
       <aside
         className={cn(
           // Mobile: fixed drawer that slides in from the left.
-          "fixed inset-y-0 left-0 z-40 flex h-full w-64 flex-col border-r border-border bg-card",
+          "fixed inset-y-0 left-0 z-40 flex h-full flex-col border-r border-border bg-card",
           "transition-transform duration-200 ease-out will-change-transform",
           open ? "translate-x-0" : "-translate-x-full",
           // Desktop: static, always visible — reset all the mobile framing.
-          "lg:static lg:z-0 lg:w-60 lg:translate-x-0 lg:transition-none",
+          "lg:static lg:z-0 lg:translate-x-0 lg:transition-all lg:duration-300",
+          // Width based on collapsed state on desktop, full width on mobile
+          "w-64",
+          isCollapsed && "lg:w-[72px]"
         )}
         aria-label="Primary"
       >
-        {/* Logo row. On mobile we put a close button here; on desktop the
-            close button is hidden since the sidebar is always-visible. */}
-        <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
+        <div className={cn("flex h-14 shrink-0 items-center gap-2 border-b border-border px-4", isCollapsed ? "justify-center px-0 lg:px-0" : "justify-between")}>
           <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <MessageSquare className="h-4 w-4" />
             </div>
-            <span className="text-sm font-semibold text-foreground">
+            <span className={cn("text-sm font-semibold text-foreground transition-opacity", isCollapsed && "lg:hidden")}>
               Deccan Filings
             </span>
           </Link>
@@ -200,76 +212,123 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         </div>
 
         {/* Main navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4">
-          <ul className="flex flex-col gap-1">
-            {navItems.map((item) => {
-              const isActive =
-                pathname === item.href ||
-                (item.href !== "/dashboard" && pathname.startsWith(item.href));
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-4">
+          <TooltipProvider delayDuration={0}>
+            <ul className="flex flex-col gap-1">
+              {navItems.map((item) => {
+                if (item.href === "/team-action-items" && accountRole !== 'admin' && accountRole !== 'owner') {
+                  return null;
+                }
 
-              const showUnreadDot =
-                item.href === "/inbox" && totalUnread > 0 && !isActive;
+                const isActive =
+                  pathname === item.href ||
+                  (item.href !== "/dashboard" && pathname.startsWith(item.href));
 
-              return (
-                <li key={item.href}>
+                const showUnreadDot =
+                  item.href === "/inbox" && totalUnread > 0 && !isActive;
+
+                const linkContent = (
                   <Link
                     href={item.href}
                     className={cn(
                       // Taller on mobile so fingers can hit the row reliably (≥44px).
-                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
+                      "flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2 overflow-hidden",
+                      isCollapsed ? "justify-center lg:px-0" : "gap-3",
                       isActive
                         ? "bg-primary/10 text-primary"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground",
                     )}
                   >
-                    <item.icon className="h-4 w-4" />
-                    <span className="flex-1">{item.label}</span>
-                    {item.beta && (
+                    <div className="relative flex shrink-0 items-center justify-center">
+                      <item.icon className="h-4 w-4" />
+                      {showUnreadDot && (
+                        <span
+                          aria-label={`${totalUnread} unread conversation${totalUnread === 1 ? "" : "s"}`}
+                          className="absolute -right-1.5 -top-1.5 flex h-2 w-2"
+                        >
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                        </span>
+                      )}
+                    </div>
+                    <span className={cn("flex-1 truncate", isCollapsed && "lg:hidden")}>{item.label}</span>
+                    {item.beta && !isCollapsed && (
                       <span
                         aria-label="Beta feature"
-                        className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300"
+                        className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300"
                       >
                         Beta
                       </span>
                     )}
-                    {showUnreadDot && (
-                      <span
-                        aria-label={`${totalUnread} unread conversation${totalUnread === 1 ? "" : "s"}`}
-                        className="relative flex h-2 w-2"
-                      >
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                        <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                      </span>
-                    )}
                   </Link>
-                </li>
-              );
-            })}
-          </ul>
+                );
+
+                return (
+                  <li key={item.href}>
+                    {isCollapsed ? (
+                      <Tooltip>
+                        <TooltipTrigger className="w-full">
+                          {linkContent}
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="flex items-center gap-2">
+                          {item.label}
+                          {item.beta && (
+                            <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300">
+                              Beta
+                            </span>
+                          )}
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      linkContent
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </TooltipProvider>
 
           <div className="my-4 border-t border-border" />
 
-          <ul className="flex flex-col gap-1">
-            {bottomNavItems.map((item) => {
-              const isActive = pathname.startsWith(item.href);
-              return (
-                <li key={item.href}>
+          <TooltipProvider delayDuration={0}>
+            <ul className="flex flex-col gap-1">
+              {bottomNavItems.map((item) => {
+                const isActive = pathname.startsWith(item.href);
+                const linkContent = (
                   <Link
                     href={item.href}
                     className={cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
+                      "flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
+                      isCollapsed ? "justify-center lg:px-0" : "gap-3",
                       isActive
                         ? "bg-primary/10 text-primary"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground",
                     )}
                   >
-                    <item.icon className="h-4 w-4" />
-                    {item.label}
+                    <item.icon className="h-4 w-4 shrink-0" />
+                    <span className={cn("truncate", isCollapsed && "lg:hidden")}>{item.label}</span>
                   </Link>
-                </li>
-              );
-            })}
-          </ul>
+                );
+
+                return (
+                  <li key={item.href}>
+                    {isCollapsed ? (
+                      <Tooltip>
+                        <TooltipTrigger className="w-full">
+                          {linkContent}
+                        </TooltipTrigger>
+                        <TooltipContent side="right">
+                          {item.label}
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      linkContent
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </TooltipProvider>
         </nav>
 
         {/* User section */}
@@ -280,20 +339,30 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               match, so we hide it to avoid duplicating the user name
               below; for renamed or shared accounts it tells the user
               which account they're acting in. */}
-          {showAccountStrip && account?.name ? (
+          {/* Collapse Toggle */}
+          <div className="mb-2 hidden lg:flex">
+            <button
+              onClick={onToggleCollapse}
+              className={cn(
+                "flex h-8 w-full items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
+                isCollapsed ? "justify-center" : "px-3 gap-3"
+              )}
+              aria-label="Toggle sidebar"
+            >
+              <div className="flex items-center justify-center">
+                {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+              </div>
+              <span className={cn("text-xs font-medium", isCollapsed && "hidden")}>Collapse</span>
+            </button>
+          </div>
+
+          {showAccountStrip && account?.name && !isCollapsed ? (
             <div className="mb-2 flex items-center gap-2 px-3 text-xs text-muted-foreground">
               <UsersRound className="size-3.5 shrink-0" />
-              {/* `title=` exposes the full name on hover when it
-                  gets truncated (long account names + narrow
-                  sidebars). Cheap a11y win. */}
               <span className="truncate" title={account.name}>
                 {account.name}
               </span>
               {accountRole ? (
-                // Always render the chip — owners used to be
-                // invisible here, which made them indistinguishable
-                // from admins at a glance. Now everyone sees their
-                // role (with a colour cue) regardless of tier.
                 (() => {
                   const meta = ROLE_CHIP[accountRole];
                   const Icon = meta.icon;
@@ -310,7 +379,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             </div>
           ) : null}
           <DropdownMenu>
-            <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/60 focus:bg-muted/60 focus:outline-none data-popup-open:bg-muted/60">
+            <DropdownMenuTrigger className={cn("flex w-full items-center rounded-lg py-2 text-left transition-colors hover:bg-muted/60 focus:bg-muted/60 focus:outline-none data-popup-open:bg-muted/60", isCollapsed ? "justify-center px-0" : "px-3 gap-3")}>
               <Avatar className="size-8 shrink-0">
                 {profile?.avatar_url ? (
                   <AvatarImage
@@ -324,7 +393,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                     "U"}
                 </AvatarFallback>
               </Avatar>
-              <div className="min-w-0 flex-1">
+              <div className={cn("min-w-0 flex-1", isCollapsed && "lg:hidden")}>
                 <p className="truncate text-sm font-medium text-foreground">
                   {profile?.full_name ?? "User"}
                 </p>

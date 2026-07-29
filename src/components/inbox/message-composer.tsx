@@ -37,6 +37,7 @@ import {
   MEDIA_MAX_BYTES_BY_KIND,
 } from "@/lib/storage/upload-media";
 import { ReplyQuote } from "./reply-quote";
+import type { CannedResponse } from "@/types";
 
 /** Media content types an agent can send from the composer. */
 export type ComposerMediaKind = "image" | "video" | "document" | "audio";
@@ -94,11 +95,12 @@ interface MediaDraft {
 interface MessageComposerProps {
   conversationId: string;
   sessionExpired: boolean;
-  onSend: (text: string, replyToId?: string) => void;
-  onSendMedia: (payload: SendMediaPayload) => void;
+  onSend: (text: string, replyToId?: string, isInternal?: boolean) => void;
+  onSendMedia: (payload: SendMediaPayload & { isInternal?: boolean }) => void;
   onOpenTemplates: () => void;
   replyTo?: ReplyDraft | null;
   onClearReply?: () => void;
+  onTyping?: (isTyping: boolean) => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -120,9 +122,11 @@ export function MessageComposer({
   onOpenTemplates,
   replyTo,
   onClearReply,
+  onTyping,
 }: MessageComposerProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [isInternal, setIsInternal] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Media attachment state. `draft` holds an uploaded-but-not-yet-sent
@@ -136,6 +140,22 @@ export function MessageComposer({
   // state. Kept in sync below so navigating away with a staged-but-unsent
   // attachment GCs the orphaned object.
   const draftRef = useRef<MediaDraft | null>(null);
+  const typingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  const [cannedResponses, setCannedResponses] = useState<CannedResponse[]>([]);
+  const [showCanned, setShowCanned] = useState(false);
+  const [cannedFilter, setCannedFilter] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  useEffect(() => {
+    fetch("/api/canned-responses")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) setCannedResponses(data);
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
@@ -191,38 +211,88 @@ export function MessageComposer({
     el.style.height = `${Math.min(el.scrollHeight, 96)}px`;
   }, []);
 
-  const handleSend = useCallback(async () => {
+  const handleSend = useCallback(() => {
     const trimmed = text.trim();
-    if (!trimmed || sending || sessionExpired) return;
+    if (!trimmed || sending) return;
+    if (sessionExpired && !isInternal) return; // Cannot send to customer if session expired
 
     setSending(true);
-    try {
-      onSend(trimmed, replyTo?.id);
-      setText("");
-      if (textareaRef.current) {
-        textareaRef.current.style.height = "auto";
-      }
-    } finally {
-      setSending(false);
-    }
-  }, [text, sending, sessionExpired, onSend, replyTo?.id]);
+    // Let the parent manage the Promise so the UI is snappy;
+    // clearing the text immediately is standard chat UX.
+    onSend(trimmed, replyTo?.id, isInternal);
+    setText("");
+    onClearReply?.();
+    setSending(false);
+    
+    if (onTyping) onTyping(false);
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    
+    textareaRef.current?.focus();
+  }, [text, sending, sessionExpired, isInternal, onSend, replyTo?.id, onClearReply, onTyping]);
+
+  const filteredCanned = cannedResponses.filter((c) =>
+    c.shortcut.toLowerCase().includes(cannedFilter) || 
+    c.content.toLowerCase().includes(cannedFilter)
+  );
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (showCanned && filteredCanned.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setSelectedIndex((i) => Math.min(i + 1, filteredCanned.length - 1));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setSelectedIndex((i) => Math.max(i - 1, 0));
+          return;
+        }
+        if (e.key === "Enter" || e.key === "Tab") {
+          e.preventDefault();
+          setText(filteredCanned[selectedIndex].content);
+          setShowCanned(false);
+          setTimeout(adjustHeight, 0);
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setShowCanned(false);
+          return;
+        }
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
       }
     },
-    [handleSend]
+    [handleSend, showCanned, filteredCanned, selectedIndex, adjustHeight]
   );
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setText(e.target.value);
       adjustHeight();
+
+      const val = e.target.value;
+      if (val.startsWith("/")) {
+        setShowCanned(true);
+        setCannedFilter(val.slice(1).toLowerCase());
+        setSelectedIndex(0);
+      } else {
+        setShowCanned(false);
+      }
+
+      if (onTyping) {
+        onTyping(true);
+        if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+        typingTimerRef.current = setTimeout(() => {
+          onTyping(false);
+        }, 3000);
+      }
     },
-    [adjustHeight]
+    [adjustHeight, onTyping]
   );
 
   const handleAiSuggest = useCallback(async () => {
@@ -312,7 +382,7 @@ export function MessageComposer({
   );
 
   const startRecording = useCallback(async () => {
-    if (inputsDisabled || busy || recording) return;
+    if ((!isInternal && sessionExpired) || busy || recording) return;
     if (!navigator.mediaDevices?.getUserMedia || typeof AudioContext === "undefined") {
       toast.error("Voice recording isn't supported in this browser.");
       return;
@@ -343,7 +413,7 @@ export function MessageComposer({
       recorderRef.current = null;
       toast.error("Microphone access denied or unavailable.");
     }
-  }, [inputsDisabled, busy, recording, finalizeRecording]);
+  }, [isInternal, sessionExpired, busy, recording, finalizeRecording]);
 
   const stopRecording = useCallback(() => {
     clearTimer();
@@ -380,11 +450,12 @@ export function MessageComposer({
         draft.kind === "audio" ? undefined : draft.caption.trim() || undefined,
       filename: draft.kind === "document" ? draft.filename : undefined,
       replyToId: replyTo?.id,
+      isInternal,
     });
     // The object is now owned by the sent message — clear without GC.
     setDraft(null);
     onClearReply?.();
-  }, [draft, busy, onSendMedia, replyTo?.id, onClearReply]);
+  }, [draft, busy, onSendMedia, replyTo?.id, onClearReply, isInternal]);
 
   // Discard GCs the staged object — it was uploaded but never sent.
   const discardDraft = useCallback(() => {
@@ -399,9 +470,9 @@ export function MessageComposer({
   // ---- Render --------------------------------------------------------
 
   return (
-    <div className="border-t border-border bg-card p-3">
+    <div className="border-t border-border bg-card">
       {replyTo && (
-        <div className="mb-2">
+        <div className="p-3 pb-0">
           <ReplyQuote
             authorLabel={replyTo.authorLabel}
             preview={replyTo.preview}
@@ -409,7 +480,6 @@ export function MessageComposer({
           />
         </div>
       )}
-
 
       {/* Hidden file inputs driven by the attach menu. */}
       <input
@@ -443,28 +513,38 @@ export function MessageComposer({
         }}
       />
 
-      {sessionExpired ? (
-        <GatedButton
-          canAct={!readOnly}
-          gateReason="send messages"
-          onClick={onOpenTemplates}
-          className="w-full h-12 flex items-center justify-center gap-2 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
-        >
-          <LayoutTemplate className="size-5" />
-          <span className="font-medium">Send Template to Re-engage</span>
-        </GatedButton>
-      ) : draft ? (
-        <MediaDraftPreview
-          draft={draft}
-          busy={busy}
-          readOnly={readOnly}
-          onCaptionChange={setCaption}
-          onDiscard={discardDraft}
-          onSend={sendDraft}
-        />
+      <div className="flex w-full items-center gap-4 py-2 px-3">
+        <div className="flex items-center gap-1">
+          <button 
+            type="button" 
+            onClick={() => setIsInternal(false)} 
+            className={cn("px-3 py-1 text-xs font-medium rounded-md transition-colors", !isInternal ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}
+          >
+            Reply
+          </button>
+          <button 
+            type="button" 
+            onClick={() => setIsInternal(true)} 
+            className={cn("px-3 py-1 text-xs font-medium rounded-md transition-colors", isInternal ? "bg-yellow-500 text-white" : "text-muted-foreground hover:bg-muted")}
+          >
+            Internal Note
+          </button>
+        </div>
+      </div>
+
+      {draft ? (
+        <div className="p-3">
+          <MediaDraftPreview
+            draft={draft}
+            busy={busy}
+            readOnly={readOnly}
+            onCaptionChange={setCaption}
+            onDiscard={discardDraft}
+            onSend={sendDraft}
+          />
+        </div>
       ) : recording ? (
-        // Recording bar — replaces the composer while the mic is live.
-        <div className="flex items-center gap-3 rounded-xl border border-border bg-muted px-4 py-2.5">
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-muted px-4 py-2.5 m-3">
           <span className="flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-500" />
           <span className="flex-1 text-sm text-foreground">
             Recording… {formatDuration(recordSeconds)} /{" "}
@@ -487,16 +567,16 @@ export function MessageComposer({
           </Button>
         </div>
       ) : (
-        <div className="flex items-end gap-2">
+        <div className="flex flex-1 items-end gap-2 px-3 pb-3">
           {/* Attach menu — photo / video / document / voice. */}
           <DropdownMenu>
             <DropdownMenuTrigger
-              disabled={inputsDisabled || busy}
+              disabled={(!isInternal && sessionExpired) || busy || !canSend}
               title={
-                readOnly
+                !canSend
                   ? "Read-only — your role can't send messages"
-                  : inputsDisabled
-                    ? undefined
+                  : (!isInternal && sessionExpired)
+                    ? "Session expired - use a template"
                     : "Attach media"
               }
               className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
@@ -544,7 +624,7 @@ export function MessageComposer({
             size="sm"
             canAct={!readOnly}
             gateReason="send messages"
-            disabled={sessionExpired || aiSuggesting}
+            disabled={(!isInternal && sessionExpired) || aiSuggesting}
             title={readOnly ? undefined : "Generate AI Reply"}
             className={cn(
               "h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-purple-500",
@@ -555,37 +635,68 @@ export function MessageComposer({
             {aiSuggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
           </GatedButton>
 
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              readOnly
-                ? "Read-only — viewers can browse but not reply"
-                : sessionExpired
-                  ? "Session expired - use a template"
-                  : "Type a message... (Shift+Enter for new line)"
-            }
-            disabled={sessionExpired || readOnly}
-            rows={1}
-            // Textarea keeps its own inline title — the GatedButton
-            // wrapping pattern doesn't apply to non-button inputs.
-            // The placeholder text also surfaces the read-only state.
-            title={readOnly ? "Read-only — your role can't send messages" : undefined}
-            className={cn(
-              "flex-1 resize-none rounded-xl border border-border bg-muted px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50",
-              (sessionExpired || readOnly) && "cursor-not-allowed opacity-50"
+          <div className="relative flex-1">
+            {showCanned && filteredCanned.length > 0 && (
+              <div className="absolute bottom-full left-0 z-50 mb-2 w-full max-w-sm rounded-lg border bg-popover text-popover-foreground shadow-md outline-none animate-in slide-in-from-bottom-2 max-h-64 overflow-y-auto">
+                <div className="p-1">
+                  {filteredCanned.map((c, i) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className={cn(
+                        "flex w-full flex-col items-start gap-1 rounded-sm px-2 py-1.5 text-sm outline-none",
+                        i === selectedIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50 text-foreground"
+                      )}
+                      onClick={() => {
+                        setText(c.content);
+                        setShowCanned(false);
+                        setTimeout(adjustHeight, 0);
+                        textareaRef.current?.focus();
+                      }}
+                      onMouseEnter={() => setSelectedIndex(i)}
+                    >
+                      <span className="font-semibold text-primary">{c.shortcut}</span>
+                      <span className="line-clamp-2 text-xs text-muted-foreground text-left">{c.content}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
-          />
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                readOnly
+                  ? "Read-only — viewers can browse but not reply"
+                  : (!isInternal && sessionExpired)
+                    ? "Session expired - use a template"
+                    : isInternal 
+                      ? "Type an internal note... (only visible to team)" 
+                      : "Type a message... (Shift+Enter for new line)"
+              }
+              disabled={(!isInternal && sessionExpired) || readOnly}
+              rows={1}
+              // Textarea keeps its own inline title — the GatedButton
+              // wrapping pattern doesn't apply to non-button inputs.
+              // The placeholder text also surfaces the read-only state.
+              title={readOnly ? "Read-only — your role can't send messages" : undefined}
+              className={cn(
+                "w-full resize-none rounded-xl border border-border px-4 py-2.5 text-sm outline-none transition-colors focus:border-primary/50",
+                (!isInternal && sessionExpired || readOnly) ? "cursor-not-allowed opacity-50 bg-muted text-foreground placeholder-muted-foreground" : 
+                isInternal ? "bg-yellow-500/10 text-yellow-900 dark:text-yellow-100 placeholder-yellow-700/50 border-yellow-500/30 focus:border-yellow-500/50" : "bg-muted text-foreground placeholder-muted-foreground",
+              )}
+            />
+          </div>
 
           <GatedButton
             size="sm"
             canAct={!readOnly}
             gateReason="send messages"
-            disabled={!text.trim() || sessionExpired || sending}
+            disabled={!text.trim() || (!isInternal && sessionExpired) || sending}
             onClick={handleSend}
-            className="h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90 disabled:opacity-40"
+            className={cn("h-9 w-9 shrink-0 p-0 disabled:opacity-40", isInternal ? "bg-yellow-500 hover:bg-yellow-600 text-white" : "bg-primary hover:bg-primary/90 text-primary-foreground")}
           >
             <Send className="h-4 w-4" />
           </GatedButton>

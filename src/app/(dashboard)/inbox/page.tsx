@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Conversation, Message, Contact, ConversationStatus } from "@/types";
 import { useRealtime } from "@/hooks/use-realtime";
+import { useAuth } from "@/hooks/use-auth";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
@@ -19,6 +20,7 @@ const CONTACT_PANEL_STORAGE_KEY = "wacrm:inbox:contact-panel-open";
 export default function InboxPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user, profile } = useAuth();
   /**
    * `?c=<id>` deep-link support. Used when landing here from the
    * dashboard's recent-conversations list so the right thread opens
@@ -155,6 +157,15 @@ export default function InboxPage() {
     }
   }, []);
 
+  // Request Notification permission for Desktop push
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+        Notification.requestPermission();
+      }
+    }
+  }, []);
+
   // Check WhatsApp connection status on mount
   useEffect(() => {
     const checkConnection = async () => {
@@ -217,6 +228,35 @@ export default function InboxPage() {
           });
         }
 
+        // Handle @mentions in internal notes
+        if (
+          newMsg.is_internal &&
+          newMsg.sender_id !== user?.id &&
+          profile?.full_name
+        ) {
+          const firstName = profile.full_name.split(" ")[0];
+          if (
+            newMsg.content_text?.includes(`@${firstName}`) ||
+            newMsg.content_text?.includes(`@${profile.full_name}`) ||
+            newMsg.content_text?.includes(`@all`)
+          ) {
+            toast.message("You were mentioned in a note", {
+              description: newMsg.content_text,
+              action: {
+                label: "Open",
+                onClick: () => router.push(`?c=${newMsg.conversation_id}`),
+              },
+            });
+
+            if ("Notification" in window && Notification.permission === "granted") {
+              const customerName = conversations.find((c) => c.id === newMsg.conversation_id)?.contact?.name || "Customer";
+              new Notification(`New Mention from ${customerName}`, {
+                body: newMsg.content_text,
+              });
+            }
+          }
+        }
+
         // Update conversation list preview. We need to know *synchronously*
         // whether the conv is already in state to decide between patching
         // the preview and triggering a hydrate — see the comment on
@@ -255,7 +295,7 @@ export default function InboxPage() {
         );
       }
     },
-    [activeConversation, hydrateConversation]
+    [activeConversation, hydrateConversation, profile, user, router, conversations]
   );
 
   // Handle realtime conversation events
@@ -315,9 +355,31 @@ export default function InboxPage() {
             prev ? { ...prev, ...conv } : prev
           );
         }
+
+        // Notify if assigned to current user
+        if (
+          event.old.assigned_agent_id !== conv.assigned_agent_id &&
+          conv.assigned_agent_id === user?.id
+        ) {
+          toast.success("New Assignment", {
+            description: "You have been assigned a new conversation.",
+            action: {
+              label: "Open",
+              onClick: () => {
+                router.push(`?c=${conv.id}`);
+              },
+            },
+          });
+
+          if ("Notification" in window && Notification.permission === "granted") {
+            new Notification("New Assignment", {
+              body: "You have been assigned a new conversation.",
+            });
+          }
+        }
       }
     },
-    [activeConversation, hydrateConversation]
+    [activeConversation, hydrateConversation, user?.id, router]
   );
 
   // Subscribe to realtime. The `isConnected` flag below feeds the
@@ -627,7 +689,7 @@ export default function InboxPage() {
             toggle — which is itself desktop-only — never affects it. */}
         {contactPanelOpen && (
           <div className="hidden lg:block">
-            <ContactSidebar contact={activeContact} />
+            <ContactSidebar contact={activeContact} conversation={activeConversation} />
           </div>
         )}
       </div>

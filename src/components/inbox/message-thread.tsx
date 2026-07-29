@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { usePresence } from "@/hooks/use-presence";
 import { cn } from "@/lib/utils";
 import type {
   Conversation,
@@ -163,6 +164,7 @@ export function MessageThread({
   onToggleContactPanel,
 }: MessageThreadProps) {
   const { user } = useAuth();
+  const { activeUsers, setTyping } = usePresence(conversation?.id || "");
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
@@ -566,6 +568,12 @@ export function MessageThread({
         .eq("id", conversation.id);
 
       onStatusChange(conversation.id, status);
+      
+      if (status === "closed") {
+        fetch(`/api/whatsapp/conversations/${conversation.id}/csat`, {
+          method: "POST"
+        }).catch((err) => console.error("Failed to send CSAT:", err));
+      }
     },
     [conversation, onStatusChange]
   );
@@ -847,6 +855,13 @@ export function MessageThread({
             <Clock className="h-3 w-3" />
             {sessionInfo.remaining}
           </Badge>
+
+          {activeUsers.length > 0 && (
+            <span className="ml-2 hidden truncate text-xs text-muted-foreground animate-in fade-in sm:block">
+              {activeUsers.map(u => u.name).join(', ')}{' '}
+              {activeUsers.some(u => u.status === 'typing') ? 'is typing...' : 'is viewing'}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -1075,6 +1090,7 @@ export function MessageThread({
         onOpenTemplates={handleOpenTemplates}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
+        onTyping={setTyping}
       />
 
       <TemplatePicker

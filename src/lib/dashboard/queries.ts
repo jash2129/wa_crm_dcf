@@ -396,3 +396,133 @@ export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> 
     .sort((a, b) => (a.at > b.at ? -1 : a.at < b.at ? 1 : 0))
     .slice(0, limit)
 }
+
+// --- 6. Team Productivity (Superadmin) --------------------------------
+
+import type { AgentProductivityRow } from './types'
+
+export async function loadTeamProductivity(
+  db: DB,
+  days: number,
+): Promise<AgentProductivityRow[]> {
+  const threshold = daysAgoStart(days).toISOString()
+
+  // 1. Fetch team members (owners, admins, agents)
+  const { data: profiles, error: profileErr } = await db
+    .from('profiles')
+    .select('user_id, full_name, avatar_url, agent_status, account_role')
+    .in('account_role', ['owner', 'admin', 'agent'])
+    .order('full_name', { ascending: true })
+
+  if (profileErr) throw profileErr
+  if (!profiles || profiles.length === 0) return []
+
+  // 2. Fetch active loads
+  const { data: convs, error: convErr } = await db
+    .from('conversations')
+    .select('assigned_agent_id')
+    .eq('status', 'open')
+    .not('assigned_agent_id', 'is', null)
+
+  if (convErr) throw convErr
+
+  const activeLoadMap = new Map<string, number>()
+  for (const c of convs ?? []) {
+    if (c.assigned_agent_id) {
+      activeLoadMap.set(c.assigned_agent_id, (activeLoadMap.get(c.assigned_agent_id) ?? 0) + 1)
+    }
+  }
+
+  // 3. Fetch replies & response time within timeframe
+  const { data: messages, error: msgErr } = await db
+    .from('messages')
+    .select('conversation_id, sender_type, sender_id, created_at')
+    .gte('created_at', threshold)
+    .order('conversation_id', { ascending: true })
+    .order('created_at', { ascending: true })
+
+  if (msgErr) throw msgErr
+
+  const repliesMap = new Map<string, number>()
+  const responseTimeMap = new Map<string, number[]>() // Map<agentId, minutes[]>
+
+  let currentConv = ''
+  let pendingCustomer: Date | null = null
+
+  for (const row of messages ?? []) {
+    if (row.conversation_id !== currentConv) {
+      currentConv = row.conversation_id
+      pendingCustomer = null
+    }
+    const ts = new Date(row.created_at)
+
+    if (row.sender_type === 'customer') {
+      if (!pendingCustomer) pendingCustomer = ts
+    } else if (row.sender_type === 'agent' && row.sender_id) {
+      // It's an agent reply
+      repliesMap.set(row.sender_id, (repliesMap.get(row.sender_id) ?? 0) + 1)
+      
+      if (pendingCustomer) {
+        const diffMin = (ts.getTime() - pendingCustomer.getTime()) / 60_000
+        if (diffMin >= 0) {
+          if (!responseTimeMap.has(row.sender_id)) {
+            responseTimeMap.set(row.sender_id, [])
+          }
+          responseTimeMap.get(row.sender_id)!.push(diffMin)
+        }
+        pendingCustomer = null
+      }
+    } else if (row.sender_type === 'bot') {
+      // Bot message (like SLA unassign) clears the pending customer state
+      pendingCustomer = null
+    }
+  }
+
+  // 4. Fetch CSAT scores for recently updated conversations
+  const { data: csatData, error: csatErr } = await db
+    .from('conversations')
+    .select('assigned_agent_id, csat_score')
+    .gte('updated_at', threshold)
+    .not('assigned_agent_id', 'is', null)
+    .not('csat_score', 'is', null)
+
+  const csatMap = new Map<string, number[]>()
+  if (!csatErr && csatData) {
+    for (const c of csatData) {
+      if (c.assigned_agent_id && c.csat_score != null) {
+        if (!csatMap.has(c.assigned_agent_id)) csatMap.set(c.assigned_agent_id, [])
+        csatMap.get(c.assigned_agent_id)!.push(c.csat_score)
+      }
+    }
+  } else if (csatErr) {
+    console.warn('[dashboard] csat query failed (migration missing?):', csatErr)
+  }
+
+  const rows: AgentProductivityRow[] = profiles.map((p) => {
+    const times = responseTimeMap.get(p.user_id) ?? []
+    const avgResponse = times.length > 0 ? times.reduce((a, b) => a + b, 0) / times.length : null
+
+    const csatScores = csatMap.get(p.user_id) ?? []
+    const avgCsat = csatScores.length > 0 ? csatScores.reduce((a, b) => a + b, 0) / csatScores.length : null
+
+    return {
+      user_id: p.user_id,
+      full_name: p.full_name,
+      avatar_url: p.avatar_url ?? undefined,
+      agent_status: p.agent_status as 'online' | 'away' | 'offline',
+      active_conversations: activeLoadMap.get(p.user_id) ?? 0,
+      replies_sent: repliesMap.get(p.user_id) ?? 0,
+      avg_response_minutes: avgResponse,
+      avg_csat_score: avgCsat,
+    }
+  })
+
+  // Sort by active conversations descending, then replies descending
+  return rows.sort((a, b) => {
+    if (b.active_conversations !== a.active_conversations) {
+      return b.active_conversations - a.active_conversations
+    }
+    return b.replies_sent - a.replies_sent
+  })
+}
+

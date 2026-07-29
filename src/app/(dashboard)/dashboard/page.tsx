@@ -17,6 +17,7 @@ import {
   loadMetrics,
   loadPipelineDonut,
   loadResponseTime,
+  loadTeamProductivity,
 } from '@/lib/dashboard/queries'
 import type {
   ActivityItem,
@@ -24,6 +25,7 @@ import type {
   MetricsBundle,
   PipelineDonutData,
   ResponseTimeSummary,
+  AgentProductivityRow,
 } from '@/lib/dashboard/types'
 
 import { MetricCard } from '@/components/dashboard/metric-card'
@@ -33,11 +35,12 @@ import { ConversationsChart } from '@/components/dashboard/conversations-chart'
 import { PipelineDonut } from '@/components/dashboard/pipeline-donut'
 import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
+import { TeamProductivity } from '@/components/dashboard/team-productivity'
 
 type RangeDays = 7 | 30 | 90
 
 export default function DashboardPage() {
-  const { defaultCurrency } = useAuth()
+  const { defaultCurrency, isOwner } = useAuth()
   const [metrics, setMetrics] = useState<MetricsBundle | null>(null)
   const [metricsLoading, setMetricsLoading] = useState(true)
 
@@ -60,6 +63,9 @@ export default function DashboardPage() {
 
   const [activity, setActivity] = useState<ActivityItem[] | null>(null)
   const [activityLoading, setActivityLoading] = useState(true)
+
+  const [teamProductivity, setTeamProductivity] = useState<AgentProductivityRow[] | null>(null)
+  const [teamProductivityLoading, setTeamProductivityLoading] = useState(true)
 
   const loadAll = useCallback(() => {
     const db = createClient()
@@ -94,6 +100,11 @@ export default function DashboardPage() {
       .then((a) => setActivity(a))
       .catch((err) => console.error('[dashboard] activity failed:', err))
       .finally(() => setActivityLoading(false))
+
+    void loadTeamProductivity(db, 30)
+      .then((rows) => setTeamProductivity(rows))
+      .catch((err) => console.error('[dashboard] team productivity failed:', err))
+      .finally(() => setTeamProductivityLoading(false))
   }, [])
 
   useEffect(() => {
@@ -209,6 +220,23 @@ export default function DashboardPage() {
 
       {/* Response time */}
       <ResponseTimeChart data={responseTime} loading={responseTimeLoading} />
+
+      {/* Team Productivity (Owner Only) */}
+      {isOwner && (
+        <div className="space-y-4 pt-4">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight">Team Productivity</h2>
+            <p className="text-sm text-muted-foreground">
+              Agent performance over the last 30 days.
+            </p>
+          </div>
+          {teamProductivityLoading ? (
+            <SkeletonCard />
+          ) : (
+            <TeamProductivity rows={teamProductivity ?? []} />
+          )}
+        </div>
+      )}
 
       {/* Activity feed */}
       <ActivityFeed items={activity} loading={activityLoading} />

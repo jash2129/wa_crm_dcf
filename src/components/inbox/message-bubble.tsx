@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ReplyQuote } from "./reply-quote";
 import { MessageReactions } from "./message-reactions";
+import { Lock } from "lucide-react";
 
 interface MessageBubbleProps {
   message: Message;
@@ -591,11 +592,19 @@ export function MessageBubble({
       <div
         className={cn(
           "relative rounded-2xl px-3 py-2",
-          isAgent
-            ? "rounded-br-md bg-primary text-primary-foreground"
-            : "rounded-bl-md bg-muted text-foreground",
+          message.is_internal
+            ? "rounded-br-md bg-yellow-100 text-yellow-900 border border-yellow-300 dark:bg-yellow-900/40 dark:text-yellow-100 dark:border-yellow-700"
+            : isAgent
+              ? "rounded-br-md bg-primary text-primary-foreground"
+              : "rounded-bl-md bg-muted text-foreground",
         )}
       >
+        {message.is_internal && (
+          <div className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-yellow-600 dark:text-yellow-400">
+            <Lock className="h-3 w-3" />
+            Internal Note
+          </div>
+        )}
         {reply && (
           <ReplyQuote
             authorLabel={reply.authorLabel}
@@ -612,17 +621,21 @@ export function MessageBubble({
         >
           <span
             className={cn(
-              "text-[10px]",
-              // Outbound bubbles sit on the primary fill, so the
-              // timestamp must read against that (not the neutral
-              // foreground) — otherwise it goes low-contrast in light
-              // mode. Inbound bubbles use the muted surface.
-              isAgent ? "text-primary-foreground/70" : "text-muted-foreground",
+              "ml-2 text-[10px]",
+              message.is_internal
+                ? "text-yellow-600/70 dark:text-yellow-400/70"
+                : isAgent
+                  ? "text-primary-foreground/70"
+                  : "text-muted-foreground",
             )}
           >
             {time}
           </span>
-          {isAgent && <StatusIcon status={message.status} />}
+          {isAgent && !message.is_internal && (
+            <span className="ml-1">
+              <StatusIcon status={message.status} />
+            </span>
+          )}
         </div>
       </div>
       {reactions && reactions.length > 0 && onToggleReaction && (

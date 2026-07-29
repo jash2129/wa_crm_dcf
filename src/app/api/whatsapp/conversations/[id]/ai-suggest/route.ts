@@ -77,6 +77,8 @@ export async function POST(
 
     const baseURL = selectedProvider.provider === "openrouter"
       ? "https://openrouter.ai/api/v1"
+      : selectedProvider.provider === "sarvam"
+      ? "https://api.sarvam.ai/v1"
       : undefined;
 
     // Use a reasonable default model based on provider

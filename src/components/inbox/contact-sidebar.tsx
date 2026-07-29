@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
-import type { Contact, Deal, ContactNote, Tag } from "@/types";
+import type { Contact, Deal, ContactNote, Tag, Conversation, Profile } from "@/types";
 import {
   Phone,
   Mail,
@@ -15,21 +15,32 @@ import {
   DollarSign,
   StickyNote,
   Plus,
+  UserPlus,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { format } from "date-fns";
+import { toast } from "sonner";
 
 interface ContactSidebarProps {
   contact: Contact | null;
+  conversation?: Conversation | null;
 }
 
-export function ContactSidebar({ contact }: ContactSidebarProps) {
+export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
   const { accountId } = useAuth();
   const [copied, setCopied] = useState(false);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
 
@@ -38,8 +49,8 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
     const supabase = createClient();
 
-    // Fetch deals, notes, and tags in parallel
-    const [dealsRes, notesRes, tagsRes] = await Promise.all([
+    // Fetch deals, notes, tags, and profiles in parallel
+    const [dealsRes, notesRes, tagsRes, profilesRes] = await Promise.all([
       supabase
         .from("deals")
         .select("*, stage:pipeline_stages(*)")
@@ -54,6 +65,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
         .from("contact_tags")
         .select("id, tag_id, tags(*)")
         .eq("contact_id", contact.id),
+      accountId ? supabase.from("profiles").select("*").eq("account_id", accountId) : Promise.resolve({ data: [] }),
     ]);
 
     if (dealsRes.data) setDeals(dealsRes.data);
@@ -67,7 +79,8 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
         }));
       setTags(mapped);
     }
-  }, [contact]);
+    if (profilesRes.data) setProfiles(profilesRes.data);
+  }, [contact, accountId]);
 
   // Load on contact change. setContactData/setTags run inside async
   // Supabase callbacks, not synchronously in the effect body.
@@ -114,6 +127,21 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
     }
     setAddingNote(false);
   }, [contact, newNote, accountId]);
+
+  const handleAssign = useCallback(async (userId: string | null) => {
+    if (!conversation) return;
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("conversations")
+      .update({ assigned_agent_id: userId })
+      .eq("id", conversation.id);
+      
+    if (error) {
+      toast.error("Failed to update assignment");
+    } else {
+      toast.success(userId ? "Conversation assigned" : "Conversation unassigned");
+    }
+  }, [conversation]);
 
   if (!contact) {
     return (
@@ -176,6 +204,38 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
           {/* Divider */}
           <div className="my-4 border-t border-border" />
+
+          {/* Assignment */}
+          {conversation && (
+            <div>
+              <div className="flex items-center justify-between px-1 mb-2">
+                <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <UserPlus className="h-3 w-3" />
+                  Assigned To
+                </div>
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<Button variant="outline" className="w-full justify-between h-9 px-3 font-normal" />}>
+                  {conversation.assigned_agent_id 
+                    ? profiles.find(p => p.user_id === conversation.assigned_agent_id)?.full_name || "Unknown Agent" 
+                    : <span className="text-muted-foreground">Unassigned</span>}
+                  <ChevronDown className="h-4 w-4 opacity-50" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-56">
+                  <DropdownMenuItem onClick={() => handleAssign(null)} className="text-muted-foreground">
+                    Unassigned
+                  </DropdownMenuItem>
+                  {profiles.map(p => (
+                    <DropdownMenuItem key={p.user_id} onClick={() => handleAssign(p.user_id)}>
+                      {p.full_name || p.email}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              
+              <div className="my-4 border-t border-border" />
+            </div>
+          )}
 
           {/* Tags */}
           <div>

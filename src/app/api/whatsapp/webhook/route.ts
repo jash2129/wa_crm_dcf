@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import OpenAI, { toFile } from 'openai'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
@@ -536,7 +537,7 @@ async function processMessage(
 
   // Parse message content based on type
   const { contentText, mediaUrl, mediaType, interactiveReplyId } =
-    await parseMessageContent(message, accessToken)
+    await parseMessageContent(message, accessToken, accountId)
 
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.
@@ -551,6 +552,17 @@ async function processMessage(
         '[webhook] reply context parent not found:',
         message.context.id
       )
+    }
+  }
+
+  if (interactiveReplyId?.startsWith('CSAT_')) {
+    const parts = interactiveReplyId.split('_');
+    const score = parseInt(parts[1], 10);
+    if (!isNaN(score)) {
+      await supabaseAdmin()
+        .from('conversations')
+        .update({ csat_score: score })
+        .eq('id', conversation.id);
     }
   }
 
@@ -710,7 +722,8 @@ async function processMessage(
 
 async function parseMessageContent(
   message: WhatsAppMessage,
-  accessToken: string
+  accessToken: string,
+  accountId: string
 ): Promise<{
   contentText: string | null
   mediaUrl: string | null
@@ -792,9 +805,65 @@ async function parseMessageContent(
 
     case 'audio':
       if (message.audio?.id) {
+        const mediaUrl = await verifyAndBuildUrl(message.audio.id)
+        let contentText = null
+
+        if (mediaUrl) {
+          try {
+            const { data: keys } = await supabaseAdmin()
+              .from('ai_providers')
+              .select('provider, api_key')
+              .eq('account_id', accountId)
+              .in('provider', ['sarvam', 'openai'])
+              .eq('is_active', true)
+            
+            const sarvamKey = keys?.find((k: any) => k.provider === 'sarvam')?.api_key
+            const openaiKey = keys?.find((k: any) => k.provider === 'openai')?.api_key
+            
+            if (sarvamKey || openaiKey) {
+              const { url } = await getMediaUrl({ mediaId: message.audio.id, accessToken })
+              const { buffer, contentType } = await downloadMedia({ downloadUrl: url, accessToken })
+              
+              if (sarvamKey) {
+                const formData = new FormData()
+                formData.append('file', new Blob([buffer as any], { type: contentType }), 'audio.ogg')
+                
+                const res = await fetch('https://api.sarvam.ai/speech-to-text', {
+                  method: 'POST',
+                  headers: { 'api-subscription-key': sarvamKey },
+                  body: formData
+                })
+                
+                if (res.ok) {
+                  const data = await res.json()
+                  if (data.transcript) {
+                    contentText = `[Transcript] ${data.transcript}`
+                  }
+                } else {
+                  console.warn('[webhook] Sarvam transcription failed:', res.status, await res.text())
+                }
+              } else if (openaiKey) {
+                const openai = new OpenAI({ apiKey: openaiKey })
+                const file = await toFile(buffer, 'audio.ogg', { type: contentType })
+                const transcription = await openai.audio.transcriptions.create({
+                  file,
+                  model: 'whisper-1',
+                })
+                
+                if (transcription.text) {
+                  contentText = `[Transcript] ${transcription.text}`
+                }
+              }
+            }
+          } catch (err) {
+            console.error('[webhook] Audio transcription error:', err)
+          }
+        }
+
         return {
           ...empty,
-          mediaUrl: await verifyAndBuildUrl(message.audio.id),
+          contentText,
+          mediaUrl,
           mediaType: message.audio.mime_type,
         }
       }

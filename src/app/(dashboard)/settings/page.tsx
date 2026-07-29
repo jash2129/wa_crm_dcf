@@ -16,6 +16,7 @@ import { FieldsAndTagsPanel } from '@/components/settings/fields-and-tags-panel'
 import { DealsSettings } from '@/components/settings/deals-settings';
 import { MembersTab } from '@/components/settings/members-tab';
 import { AiProvidersPanel } from '@/components/settings/ai-providers-panel';
+import { CannedResponsesPanel } from '@/components/settings/canned-responses-panel';
 import {
   resolveSection,
   type SettingsSection,
@@ -61,6 +62,7 @@ export default function SettingsPage() {
     deals: <DealsSettings />,
     members: <MembersTab />,
     ai: <AiProvidersPanel />,
+    canned: <CannedResponsesPanel />,
   };
 
   return (

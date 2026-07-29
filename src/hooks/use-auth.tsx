@@ -34,6 +34,7 @@ interface Profile {
   beta_features: string[];
   account_id: string | null;
   account_role: AccountRole | null;
+  agent_status: 'online' | 'away' | 'offline';
 }
 
 interface AccountSummary {
@@ -136,7 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // missing account collapses to null rather than a half-
           // populated row (shouldn't happen post-017 NOT NULL, but
           // belt-and-braces against forks running older schemas).
-          "id, full_name, email, avatar_url, role, beta_features, account_id, account_role, account:accounts!inner(id, name, default_currency)",
+          "id, full_name, email, avatar_url, role, beta_features, account_id, account_role, agent_status, account:accounts!inner(id, name, default_currency)",
         )
         .eq("user_id", userId)
         .maybeSingle();
@@ -196,6 +197,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           beta_features: data.beta_features ?? [],
           account_id: data.account_id ?? null,
           account_role: accountRole,
+          agent_status: data.agent_status ?? 'online',
         });
         setAccount(accountRow);
       }

@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { BottomNav } from "@/components/layout/bottom-nav";
+import { GlobalPresenceProvider } from "@/hooks/use-global-presence";
 
 // Auth-gated dashboard shell. Extracted from the layout so the layout
 // itself can stay a server component and export metadata (noindex) —
@@ -19,6 +20,20 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
   // always visible and this stays at `false` (ignored by the component).
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  useEffect(() => {
+    const saved = localStorage.getItem('wacrm:sidebar-collapsed');
+    if (saved === 'true') setIsCollapsed(true);
+  }, []);
+
+  const toggleCollapsed = useCallback(() => {
+    setIsCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('wacrm:sidebar-collapsed', String(next));
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -41,7 +56,12 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      <Sidebar open={sidebarOpen} onClose={closeSidebar} />
+      <Sidebar 
+        open={sidebarOpen} 
+        onClose={closeSidebar} 
+        isCollapsed={isCollapsed}
+        onToggleCollapse={toggleCollapsed}
+      />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header onOpenSidebar={() => setSidebarOpen(true)} />
         {/* Thinner horizontal padding on mobile so cards have room to breathe. */}
@@ -58,7 +78,9 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
-      <DashboardShellInner>{children}</DashboardShellInner>
+      <GlobalPresenceProvider>
+        <DashboardShellInner>{children}</DashboardShellInner>
+      </GlobalPresenceProvider>
     </AuthProvider>
   );
 }

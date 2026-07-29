@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus } from "@/types";
-import { Search, ChevronDown, Plus } from "lucide-react";
+import { Search, ChevronDown, Plus, UserCheck } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
@@ -37,10 +38,12 @@ const STATUS_COLORS: Record<ConversationStatus, string> = {
   closed: "bg-muted-foreground",
 };
 
-type InboxFilter = ConversationStatus | "all" | "unread";
+type InboxFilter = ConversationStatus | "all" | "unread" | "mine" | "unassigned";
 
 const FILTER_OPTIONS: { label: string; value: InboxFilter }[] = [
   { label: "All", value: "all" },
+  { label: "Mine", value: "mine" },
+  { label: "Unassigned", value: "unassigned" },
   { label: "Unread", value: "unread" },
   { label: "Open", value: "open" },
   { label: "Pending", value: "pending" },
@@ -58,6 +61,7 @@ export function ConversationList({
   const [filter, setFilter] = useState<InboxFilter>("all");
   const [loading, setLoading] = useState(true);
   const [newModalOpen, setNewModalOpen] = useState(false);
+  const { user } = useAuth();
 
   // Keep the latest callback in a ref so the fetch effect below can
   // have a stable, empty-dep identity. Previously the fetch useCallback
@@ -117,6 +121,10 @@ export function ConversationList({
 
     if (filter === "unread") {
       result = result.filter((c) => c.unread_count > 0);
+    } else if (filter === "mine") {
+      result = result.filter((c) => c.assigned_agent_id === user?.id);
+    } else if (filter === "unassigned") {
+      result = result.filter((c) => !c.assigned_agent_id);
     } else if (filter !== "all") {
       result = result.filter((c) => c.status === filter);
     }
@@ -132,7 +140,7 @@ export function ConversationList({
     }
 
     return result;
-  }, [conversations, filter, search]);
+  }, [conversations, filter, search, user?.id]);
 
   const handleSearchChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -228,6 +236,7 @@ export function ConversationList({
                 conversation={conv}
                 isActive={conv.id === activeConversationId}
                 onSelect={handleSelect}
+                currentUserId={user?.id}
               />
             ))}
           </div>
@@ -246,16 +255,22 @@ interface ConversationItemProps {
   conversation: Conversation;
   isActive: boolean;
   onSelect: (conversation: Conversation) => void;
+  currentUserId?: string;
 }
 
 function ConversationItem({
   conversation,
   isActive,
   onSelect,
+  currentUserId,
 }: ConversationItemProps) {
   const contact = conversation.contact;
   const displayName = contact?.name || contact?.phone || "Unknown";
   const initials = displayName.charAt(0).toUpperCase();
+
+  const isAssignedToMe = currentUserId && conversation.assigned_agent_id === currentUserId;
+  // If assigned to me and there are unread messages, we want it to grab attention
+  const isNeedsAttention = isAssignedToMe && conversation.unread_count > 0;
 
   const handleClick = useCallback(() => {
     onSelect(conversation);
@@ -271,8 +286,10 @@ function ConversationItem({
     <button
       onClick={handleClick}
       className={cn(
-        "flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50",
-        isActive && "border-l-2 border-primary bg-muted/70"
+        "flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 border-l-2 border-transparent",
+        isActive && "border-primary bg-muted/70",
+        !isActive && isNeedsAttention && "border-primary bg-primary/5",
+        !isActive && isAssignedToMe && !isNeedsAttention && "border-primary/30"
       )}
     >
       {/* Avatar */}
@@ -291,9 +308,20 @@ function ConversationItem({
       {/* Content */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-medium text-foreground">
-            {displayName}
-          </span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="truncate text-sm font-medium text-foreground">
+              {displayName}
+            </span>
+            {conversation.assigned_agent_id && (
+              <UserCheck 
+                className={cn(
+                  "shrink-0 h-4 w-4",
+                  conversation.unread_count > 0 ? "text-red-500" : "text-green-500"
+                )} 
+                aria-label="Assigned" 
+              />
+            )}
+          </div>
           <span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo}</span>
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">

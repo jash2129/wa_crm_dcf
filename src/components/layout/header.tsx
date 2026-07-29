@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
-import { LogOut, Menu, Settings as SettingsIcon, User } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { LogOut, Menu, Settings as SettingsIcon, User, Check, CircleDot, Moon } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -45,8 +46,15 @@ interface HeaderProps {
 
 export function Header({ onOpenSidebar }: HeaderProps) {
   const pathname = usePathname();
-  const { profile, signOut } = useAuth();
+  const { profile, refreshProfile, signOut } = useAuth();
   const title = getPageTitle(pathname);
+
+  const handleStatusChange = async (newStatus: 'online' | 'away' | 'offline') => {
+    if (!profile) return;
+    const supabase = createClient();
+    await supabase.from("profiles").update({ agent_status: newStatus }).eq("id", profile.id);
+    await refreshProfile();
+  };
 
   const initial =
     profile?.full_name?.charAt(0)?.toUpperCase() ??
@@ -106,6 +114,40 @@ export function Header({ onOpenSidebar }: HeaderProps) {
               {profile?.email ?? ""}
             </p>
           </div>
+          <DropdownMenuSeparator className="bg-border" />
+          <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Status
+          </div>
+          <DropdownMenuItem
+            onClick={() => handleStatusChange('online')}
+            className="text-popover-foreground focus:bg-accent focus:text-accent-foreground flex items-center justify-between"
+          >
+            <div className="flex items-center gap-2">
+              <CircleDot className="size-4 text-green-500" />
+              Online
+            </div>
+            {profile?.agent_status === 'online' && <Check className="size-4" />}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => handleStatusChange('away')}
+            className="text-popover-foreground focus:bg-accent focus:text-accent-foreground flex items-center justify-between"
+          >
+            <div className="flex items-center gap-2">
+              <Moon className="size-4 text-amber-500" />
+              Away
+            </div>
+            {profile?.agent_status === 'away' && <Check className="size-4" />}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => handleStatusChange('offline')}
+            className="text-popover-foreground focus:bg-accent focus:text-accent-foreground flex items-center justify-between"
+          >
+            <div className="flex items-center gap-2">
+              <div className="size-4 rounded-full border-2 border-muted-foreground" />
+              Offline
+            </div>
+            {profile?.agent_status === 'offline' && <Check className="size-4" />}
+          </DropdownMenuItem>
           <DropdownMenuSeparator className="bg-border" />
           <DropdownMenuItem
             render={

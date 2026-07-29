@@ -32,7 +32,17 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ providers: data || [] });
+  const maskedProviders = (data || []).map(p => {
+    let masked = p.api_key;
+    if (masked && masked.length > 8) {
+      masked = masked.substring(0, 4) + '...' + masked.substring(masked.length - 4);
+    } else if (masked) {
+      masked = '***';
+    }
+    return { ...p, api_key: masked };
+  });
+
+  return NextResponse.json({ providers: maskedProviders });
 }
 
 export async function POST(req: Request) {
@@ -64,13 +74,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Invalid provider' }, { status: 400 });
     }
 
+    let finalApiKey = api_key || '';
+
+    if (typeof api_key === 'string' && (api_key.includes('...') || api_key === '***')) {
+      const { data: existing } = await supabase
+        .from('ai_providers')
+        .select('api_key')
+        .eq('account_id', profile.account_id)
+        .eq('provider', provider)
+        .maybeSingle();
+      if (existing) {
+        finalApiKey = existing.api_key;
+      }
+    }
+
     const { error } = await supabase
       .from('ai_providers')
       .upsert(
         {
           account_id: profile.account_id,
           provider,
-          api_key,
+          api_key: finalApiKey,
           is_active: is_active ?? true,
           updated_at: new Date().toISOString()
         },

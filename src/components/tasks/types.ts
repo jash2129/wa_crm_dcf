@@ -11,6 +11,8 @@ export interface ActionItem {
   created_at: string;
   contact_id?: string | null;
   deal_id?: string | null;
+  target_id?: string | null;
+  estimated_hours?: number | null;
   subtasks?: {
     id: string;
     title: string;

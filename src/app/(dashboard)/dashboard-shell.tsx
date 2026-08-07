@@ -7,6 +7,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { BottomNav } from "@/components/layout/bottom-nav";
 import { GlobalPresenceProvider } from "@/hooks/use-global-presence";
+import { CommandMenu } from "@/components/layout/command-menu";
 
 // Auth-gated dashboard shell. Extracted from the layout so the layout
 // itself can stay a server component and export metadata (noindex) —
@@ -71,6 +72,7 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
         </main>
         <BottomNav />
       </div>
+      <CommandMenu />
     </div>
   );
 }

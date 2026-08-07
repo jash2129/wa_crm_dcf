@@ -51,14 +51,14 @@ const ROLE_CHIP: Record<
   },
   admin: {
     icon: Shield,
-    label: "Admin",
+    label: "Team Leader",
     // Primary-tinted: significant but not as scarce as owner.
     className:
       "border-primary/40 bg-primary/10 text-primary",
   },
   agent: {
     icon: UserCog,
-    label: "Agent",
+    label: "Team Member",
     // Neutral slate: the operational default.
     className:
       "border-border bg-muted text-foreground",

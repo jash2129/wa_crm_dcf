@@ -32,6 +32,8 @@ import {
   Download,
   ChevronDown,
   Trash2,
+  DollarSign,
+  Target,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -148,6 +150,7 @@ export default function BroadcastDetailPage() {
 
   const [broadcast, setBroadcast] = useState<Broadcast | null>(null);
   const [recipients, setRecipients] = useState<BroadcastRecipient[]>([]);
+  const [attributedDeals, setAttributedDeals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<RecipientStatus | 'all'>(
@@ -178,6 +181,13 @@ export default function BroadcastDetailPage() {
 
         if (recsError) throw recsError;
         setRecipients(recs ?? []);
+
+        // Fetch ROI Attribution Deals
+        const { data: dealsData } = await supabase
+          .from('deals')
+          .select('*')
+          .eq('broadcast_id', broadcastId);
+        setAttributedDeals(dealsData ?? []);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load broadcast');
       } finally {
@@ -271,6 +281,9 @@ export default function BroadcastDetailPage() {
     { label: 'Replied', value: broadcast.replied_count, color: 'bg-indigo-500' },
   ];
 
+  const dealsGenerated = attributedDeals.length;
+  const pipelineValueGenerated = attributedDeals.reduce((sum, d) => sum + (d.value || 0), 0);
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -345,6 +358,31 @@ export default function BroadcastDetailPage() {
             Delete
           </Button>
         )}
+      </div>
+
+      {/* ROI & Attribution */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="rounded-xl border border-border bg-card p-4 bg-emerald-500/5">
+          <div className="flex items-center gap-2">
+            <DollarSign className="h-4 w-4 text-emerald-500" />
+            <h3 className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Pipeline Value Generated</h3>
+          </div>
+          <p className="mt-3 text-3xl font-bold text-foreground">
+            ${pipelineValueGenerated.toLocaleString()}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">From deals attributed to this campaign</p>
+        </div>
+        
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="flex items-center gap-2">
+            <Target className="h-4 w-4 text-primary" />
+            <h3 className="text-sm font-medium text-foreground">Deals Created</h3>
+          </div>
+          <p className="mt-3 text-3xl font-bold text-foreground">
+            {dealsGenerated}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">Total deals sourced from this broadcast</p>
+        </div>
       </div>
 
       {/* Stats — 6 cards: Total / Sent / Delivered / Read / Replied / Failed */}

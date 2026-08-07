@@ -78,10 +78,10 @@ interface Invitation {
 
 // Editable roles in the inline dropdown. Owner is never an option —
 // promotions go through the (deferred) Transfer Ownership flow.
-const EDITABLE_ROLES: { value: AccountRole; label: string; hint: string }[] = [
-  { value: 'admin', label: 'Admin', hint: 'Manage members + everything' },
-  { value: 'agent', label: 'Agent', hint: 'Use features; no settings' },
-  { value: 'viewer', label: 'Viewer', hint: 'Read-only across the app' },
+const ROLE_OPTIONS = [
+  { value: 'admin', label: 'Team Leader', hint: 'Manage members + everything' },
+  { value: 'agent', label: 'Team Member', hint: 'Can view and respond to messages' },
+  { value: 'viewer', label: 'Viewer', hint: 'Read-only access' },
 ];
 
 // Per-role chip metadata (icon / label / colour) lives in the shared
@@ -363,7 +363,7 @@ export function MembersTab() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {EDITABLE_ROLES.map((r) => (
+                          {ROLE_OPTIONS.map((r) => (
                             <SelectItem key={r.value} value={r.value}>
                               {r.label}
                             </SelectItem>

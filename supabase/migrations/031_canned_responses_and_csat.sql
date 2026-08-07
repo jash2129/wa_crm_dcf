@@ -14,7 +14,7 @@ CREATE TABLE public.canned_responses (
 CREATE INDEX idx_canned_responses_account ON public.canned_responses(account_id);
 
 -- Enforce shortcut uniqueness per account
-ALTER TABLE pubsslic.canned_responses ADD CONSTRAINT unique_shortcut_per_account UNIQUE(account_id, shortcut);
+ALTER TABLE public.canned_responses ADD CONSTRAINT unique_shortcut_per_account UNIQUE(account_id, shortcut);
 
 -- RLS
 ALTER TABLE public.canned_responses ENABLE ROW LEVEL SECURITY;

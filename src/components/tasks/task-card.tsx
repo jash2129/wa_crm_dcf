@@ -64,6 +64,13 @@ export function TaskCard({ task, onEdit, isOverlay }: TaskCardProps) {
           </p>
         )}
 
+        {task.agent_id !== task.assignee_id && task.agent?.full_name && (
+          <div className="flex items-center gap-1.5 mt-1 text-[11px] text-muted-foreground">
+            <User2 className="h-3 w-3" />
+            <span className="truncate">Assigned by {task.agent.full_name}</span>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50">
           <div className="flex items-center text-xs text-muted-foreground gap-1.5">
             <Calendar className="h-3.5 w-3.5" />

@@ -20,6 +20,8 @@ export async function GET(req: Request) {
   }
 
   const overdue = searchParams.get('overdue') === 'true';
+  const targetId = searchParams.get('target_id');
+  const weekStart = searchParams.get('week_start'); // fetch all plan-linked tasks for a week
 
   let query = supabase
     .from('action_items')
@@ -31,7 +33,13 @@ export async function GET(req: Request) {
     .eq('account_id', profile.account_id)
     .order('created_at', { ascending: true });
 
-  if (overdue) {
+  if (targetId) {
+    query = query.eq('target_id', targetId);
+  } else if (weekStart) {
+    // Fetch tasks linked to any goal within this week (target_id is not null, target_date in the week)
+    query = query.not('target_id', 'is', null)
+      .gte('target_date', weekStart);
+  } else if (overdue) {
     query = query.lt('target_date', targetDate).neq('status', 'completed');
   } else {
     query = query.eq('target_date', targetDate);
@@ -62,7 +70,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { title, description, priority, assignee_id, target_date, status, subtasks, contact_id, deal_id } = await req.json();
+    const { title, description, priority, assignee_id, target_date, status, subtasks, contact_id, deal_id, target_id, estimated_hours } = await req.json();
     if (!title) {
       return NextResponse.json({ error: "Title is required" }, { status: 400 });
     }
@@ -83,7 +91,9 @@ export async function POST(req: Request) {
         status: status || 'todo',
         subtasks: subtasks || [],
         contact_id: contact_id || null,
-        deal_id: deal_id || null
+        deal_id: deal_id || null,
+        target_id: target_id || null,
+        estimated_hours: estimated_hours || null
       })
       .select()
       .single();

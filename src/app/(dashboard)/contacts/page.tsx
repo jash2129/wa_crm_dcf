@@ -95,8 +95,9 @@ export default function ContactsPage() {
 
   // Copy phone helper
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const handleCopyPhone = useCallback(async (e: React.MouseEvent, id: string, phone: string) => {
+  const handleCopyPhone = useCallback(async (e: React.MouseEvent, id: string, phone?: string | null) => {
     e.stopPropagation();
+    if (!phone) return;
     try {
       await navigator.clipboard.writeText(phone);
       setCopiedId(id);

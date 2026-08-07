@@ -24,7 +24,9 @@ import {
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
+  AlertTriangle,
 } from "lucide-react";
+import { InstagramIcon as Instagram, FacebookIcon as Facebook } from "@/components/icons/social-icons";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -104,6 +106,7 @@ interface MessageThreadProps {
    */
   contactPanelOpen?: boolean;
   onToggleContactPanel?: () => void;
+  viewingAgents?: { userId: string; userName?: string }[];
 }
 
 function formatDateSeparator(dateStr: string): string {
@@ -162,6 +165,7 @@ export function MessageThread({
   onRefresh,
   contactPanelOpen,
   onToggleContactPanel,
+  viewingAgents = [],
 }: MessageThreadProps) {
   const { user } = useAuth();
   const { activeUsers, setTyping } = usePresence(conversation?.id || "");
@@ -799,7 +803,7 @@ export function MessageThread({
     );
   }
 
-  const displayName = contact.name || contact.phone;
+  const displayName = contact.name || contact.phone || (contact.instagram_username ? `@${contact.instagram_username}` : "Unknown Contact");
   const messageGroups = groupMessagesByDate(messages);
   const currentStatus = STATUS_OPTIONS.find(
     (s) => s.value === conversation.status
@@ -820,6 +824,14 @@ export function MessageThread({
     // root shrink lets the bubbles' break-words / max-w caps apply.
     // Issue #257.
     <div className={cn("flex min-w-0 flex-1 flex-col", DOODLE_BG_CLASSES)}>
+      {viewingAgents.length > 0 && (
+        <div className="flex items-center gap-2 bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 text-xs text-amber-600 dark:text-amber-500 font-medium animate-in fade-in">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>
+            <strong>Collision Warning:</strong> {viewingAgents.map(a => a.userName || 'Another agent').join(', ')} {viewingAgents.length === 1 ? 'is' : 'are'} currently viewing this conversation.
+          </span>
+        </div>
+      )}
       {/* Header — solid card surface sits on top of the doodle so the
           name/avatar/dropdowns stay legible. */}
       <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-3 sm:px-4">
@@ -836,12 +848,38 @@ export function MessageThread({
               <ArrowLeft className="h-5 w-5" />
             </button>
           )}
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">
-            {displayName.charAt(0).toUpperCase()}
+          <div className="relative shrink-0">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground overflow-hidden">
+              {contact.avatar_url ? (
+                <img src={contact.avatar_url} alt={displayName} className="h-9 w-9 object-cover rounded-full" />
+              ) : (
+                displayName.charAt(0).toUpperCase()
+              )}
+            </div>
+            <div className="absolute -bottom-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-background ring-1 ring-border shadow-xs">
+              {conversation.channel === "instagram" ? (
+                <Instagram className="h-2 w-2 text-pink-500" />
+              ) : conversation.channel === "facebook" ? (
+                <Facebook className="h-2 w-2 text-[#1877F2]" />
+              ) : (
+                <MessageSquare className="h-2 w-2 text-emerald-500" />
+              )}
+            </div>
           </div>
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold text-foreground">{displayName}</h2>
-            <p className="truncate text-xs text-muted-foreground">{contact.phone}</p>
+            <p className="truncate text-xs text-muted-foreground flex items-center gap-1">
+              {conversation.channel === "instagram" ? (
+                <>
+                  <span className="text-pink-500 font-medium">Instagram</span>
+                  {contact.instagram_username && <span>• @{contact.instagram_username}</span>}
+                </>
+              ) : conversation.channel === "facebook" ? (
+                <span className="text-[#1877F2] font-medium">Facebook Messenger</span>
+              ) : (
+                contact.phone
+              )}
+            </p>
           </div>
           {/* Session timer badge — hidden on the narrowest phones so
               the name + back arrow keep their room. */}

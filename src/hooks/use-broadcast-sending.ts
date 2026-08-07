@@ -433,6 +433,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
 
       let failedCount = 0;
       const totalRecipients = recipients.length;
+      const successfulContactIds: string[] = [];
 
       for (let i = 0; i < recipients.length; i += SEND_BATCH_SIZE) {
         const batch = recipients.slice(i, i + SEND_BATCH_SIZE);
@@ -500,6 +501,10 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
                   error_message: null,
                 })
                 .eq('id', recipient.id);
+
+              if (recipient.contact?.id) {
+                successfulContactIds.push(recipient.contact.id);
+              }
             } else {
               failedCount++;
               await supabase
@@ -533,15 +538,24 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         }
       }
 
-      // ── Step 5: Finalize status ───────────────────────────────────
-      // Aggregate counts are maintained by the DB trigger (migration
-      // 003); we only flip the final status here.
       setProgress(95);
       const finalStatus = failedCount === totalRecipients ? 'failed' : 'sent';
       await supabase
         .from('broadcasts')
         .update({ status: finalStatus })
         .eq('id', broadcast.id);
+
+      // Track Attribution: Tag contacts with the campaign they just received
+      if (successfulContactIds.length > 0) {
+        // Chunk the updates if the list is huge, though Supabase handles large IN clauses well
+        for (let i = 0; i < successfulContactIds.length; i += 500) {
+          const chunk = successfulContactIds.slice(i, i + 500);
+          await supabase
+            .from('contacts')
+            .update({ last_broadcast_id: broadcast.id })
+            .in('id', chunk);
+        }
+      }
 
       setProgress(100);
       return broadcast.id;

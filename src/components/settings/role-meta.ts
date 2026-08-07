@@ -30,13 +30,13 @@ export const ROLE_META: Record<
   },
   admin: {
     icon: Shield,
-    label: 'Admin',
+    label: 'Team Leader',
     variant: 'admin',
     className: 'border-primary/40 bg-primary/10 text-primary',
   },
   agent: {
     icon: UserCog,
-    label: 'Agent',
+    label: 'Team Member',
     variant: 'muted',
     className: 'border-border bg-muted text-muted-foreground',
   },

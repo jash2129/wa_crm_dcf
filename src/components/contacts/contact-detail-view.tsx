@@ -14,6 +14,12 @@ import {
   SheetTitle,
   SheetDescription,
 } from '@/components/ui/sheet';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,7 +41,10 @@ import {
   X,
   DollarSign,
   MessageSquare,
+  MoreVertical,
+  Combine,
 } from 'lucide-react';
+import { MergeContactModal } from './merge-contact-modal';
 
 interface ContactDetailViewProps {
   open: boolean;
@@ -57,6 +66,7 @@ export function ContactDetailView({
   const [contact, setContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
+  const [mergeModalOpen, setMergeModalOpen] = useState(false);
 
   // Details tab
   const [editName, setEditName] = useState('');
@@ -201,7 +211,7 @@ export function ContactDetailView({
   }, [open, contactId, fetchContact, fetchTags, fetchNotes, fetchCustomFields, fetchDeals]);
 
   async function copyPhone() {
-    if (!contact) return;
+    if (!contact || !contact.phone) return;
     await navigator.clipboard.writeText(contact.phone);
     setCopiedPhone(true);
     setTimeout(() => setCopiedPhone(false), 2000);
@@ -407,10 +417,23 @@ export function ContactDetailView({
                   </div>
                 </div>
                 </div>
-                <Button size="sm" onClick={handleMessage} className="shrink-0 gap-2 w-full sm:w-auto">
-                  <MessageSquare className="size-4" />
-                  Message
-                </Button>
+                <div className="flex flex-col sm:flex-row items-center gap-2 shrink-0 w-full sm:w-auto mt-2 sm:mt-0">
+                  <Button size="sm" onClick={handleMessage} className="gap-2 w-full sm:w-auto">
+                    <MessageSquare className="size-4" />
+                    Message
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="w-full sm:w-auto px-2" />}>
+                      <MoreVertical className="size-4" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setMergeModalOpen(true)}>
+                        <Combine className="size-4 mr-2" />
+                        Merge Contact
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
             </SheetHeader>
 
@@ -713,6 +736,23 @@ export function ContactDetailView({
           </div>
         )}
       </SheetContent>
+
+      {contactId && contact && (
+        <MergeContactModal
+          open={mergeModalOpen}
+          onOpenChange={setMergeModalOpen}
+          survivorId={contactId}
+          survivorName={contact.name || contact.phone || 'Unknown Contact'}
+          onSuccess={() => {
+            onUpdated();
+            fetchContact();
+            fetchTags();
+            fetchNotes();
+            fetchCustomFields();
+            fetchDeals();
+          }}
+        />
+      )}
     </Sheet>
   );
 }

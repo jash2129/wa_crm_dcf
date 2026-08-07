@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus } from "@/types";
-import { Search, ChevronDown, Plus, UserCheck } from "lucide-react";
+import { Search, ChevronDown, Plus, UserCheck, MessageSquare } from "lucide-react";
+import { InstagramIcon as Instagram, FacebookIcon as Facebook } from "@/components/icons/social-icons";
 import { formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
@@ -38,13 +39,16 @@ const STATUS_COLORS: Record<ConversationStatus, string> = {
   closed: "bg-muted-foreground",
 };
 
-type InboxFilter = ConversationStatus | "all" | "unread" | "mine" | "unassigned";
+type InboxFilter = ConversationStatus | "all" | "unread" | "mine" | "unassigned" | "whatsapp" | "instagram" | "facebook";
 
 const FILTER_OPTIONS: { label: string; value: InboxFilter }[] = [
-  { label: "All", value: "all" },
+  { label: "All Channels", value: "all" },
   { label: "Mine", value: "mine" },
   { label: "Unassigned", value: "unassigned" },
   { label: "Unread", value: "unread" },
+  { label: "WhatsApp", value: "whatsapp" },
+  { label: "Instagram", value: "instagram" },
+  { label: "Facebook", value: "facebook" },
   { label: "Open", value: "open" },
   { label: "Pending", value: "pending" },
   { label: "Closed", value: "closed" },
@@ -125,6 +129,8 @@ export function ConversationList({
       result = result.filter((c) => c.assigned_agent_id === user?.id);
     } else if (filter === "unassigned") {
       result = result.filter((c) => !c.assigned_agent_id);
+    } else if (filter === "whatsapp" || filter === "instagram" || filter === "facebook") {
+      result = result.filter((c) => (c.channel || "whatsapp") === filter);
     } else if (filter !== "all") {
       result = result.filter((c) => c.status === filter);
     }
@@ -134,8 +140,9 @@ export function ConversationList({
       result = result.filter((c) => {
         const name = c.contact?.name?.toLowerCase() ?? "";
         const phone = c.contact?.phone?.toLowerCase() ?? "";
+        const igUsername = c.contact?.instagram_username?.toLowerCase() ?? "";
         const lastMsg = c.last_message_text?.toLowerCase() ?? "";
-        return name.includes(q) || phone.includes(q) || lastMsg.includes(q);
+        return name.includes(q) || phone.includes(q) || igUsername.includes(q) || lastMsg.includes(q);
       });
     }
 
@@ -292,17 +299,29 @@ function ConversationItem({
         !isActive && isAssignedToMe && !isNeedsAttention && "border-primary/30"
       )}
     >
-      {/* Avatar */}
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">
-        {contact?.avatar_url ? (
-          <img
-            src={contact.avatar_url}
-            alt={displayName}
-            className="h-10 w-10 rounded-full object-cover"
-          />
-        ) : (
-          initials
-        )}
+      {/* Avatar with Channel Badge */}
+      <div className="relative shrink-0">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground overflow-hidden">
+          {contact?.avatar_url ? (
+            <img
+              src={contact.avatar_url}
+              alt={displayName}
+              className="h-10 w-10 rounded-full object-cover"
+            />
+          ) : (
+            initials
+          )}
+        </div>
+        {/* Channel Icon Badge */}
+        <div className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-background ring-1 ring-border shadow-xs">
+          {conversation.channel === "instagram" ? (
+            <Instagram className="h-2.5 w-2.5 text-pink-500" />
+          ) : conversation.channel === "facebook" ? (
+            <Facebook className="h-2.5 w-2.5 text-[#1877F2]" />
+          ) : (
+            <MessageSquare className="h-2.5 w-2.5 text-emerald-500" />
+          )}
+        </div>
       </div>
 
       {/* Content */}
@@ -312,6 +331,11 @@ function ConversationItem({
             <span className="truncate text-sm font-medium text-foreground">
               {displayName}
             </span>
+            {conversation.channel === "instagram" && contact?.instagram_username && (
+              <span className="text-[10px] text-pink-500/80 font-mono truncate">
+                @{contact.instagram_username}
+              </span>
+            )}
             {conversation.assigned_agent_id && (
               <UserCheck 
                 className={cn(

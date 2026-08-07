@@ -74,14 +74,21 @@ export function TaskList({ tasks, onEditTask }: TaskListProps) {
                   </Badge>
                 </TableCell>
                 <TableCell>
-                  <div className="flex items-center gap-2">
-                    <Avatar className="h-6 w-6">
-                      {task.assignee?.avatar_url && <AvatarImage src={task.assignee.avatar_url} />}
-                      <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
-                    </Avatar>
-                    <span className="text-sm text-muted-foreground">
-                      {task.assignee?.full_name || "Unassigned"}
-                    </span>
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <Avatar className="h-6 w-6">
+                        {task.assignee?.avatar_url && <AvatarImage src={task.assignee.avatar_url} />}
+                        <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
+                      </Avatar>
+                      <span className="text-sm text-foreground">
+                        {task.assignee?.full_name || "Unassigned"}
+                      </span>
+                    </div>
+                    {task.agent_id !== task.assignee_id && task.agent?.full_name && (
+                      <span className="text-[11px] text-muted-foreground">
+                        by {task.agent.full_name}
+                      </span>
+                    )}
                   </div>
                 </TableCell>
                 <TableCell className="text-right text-muted-foreground">

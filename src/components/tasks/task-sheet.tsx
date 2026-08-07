@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, X, Trash2 } from "lucide-react";
+import { Plus, X, Trash2, User2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import type { ActionItem } from "./types";
 
@@ -209,6 +209,15 @@ export function TaskSheet({ task, open, onOpenChange, onUpdate, onDelete }: Task
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          )}
+
+          {task.agent_id && task.assignee_id && task.agent_id !== task.assignee_id && task.agent?.full_name && (
+            <div className="flex flex-col gap-1.5">
+              <span className="px-1 text-[13px] text-muted-foreground flex items-center gap-1.5">
+                <User2 className="h-3.5 w-3.5" />
+                Assigned by <strong>{task.agent.full_name}</strong>
+              </span>
             </div>
           )}
 

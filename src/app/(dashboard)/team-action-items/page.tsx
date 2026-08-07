@@ -12,6 +12,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TeamPlanner } from "@/components/tasks/team-planner";
 import type { ActionItem } from "@/components/tasks/types";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -34,6 +36,7 @@ export default function TeamActionItemsPage() {
   const [loading, setLoading] = useState(true);
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [activeTab, setActiveTab] = useState("plans");
 
   const fetchItems = async (date: Date) => {
     setLoading(true);
@@ -90,29 +93,42 @@ export default function TeamActionItemsPage() {
         <div className="flex items-center justify-between shrink-0">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Team Action Items</h1>
-            <p className="text-muted-foreground mt-1">Track what your agents are planning and completing today.</p>
+            <p className="text-muted-foreground mt-1">Track what your agents are planning and completing.</p>
           </div>
           
-          <div className="flex items-center gap-4 bg-muted/50 rounded-lg p-1">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={() => setCurrentDate(subDays(currentDate, 1))}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <div className="w-32 text-center font-medium">
-              {isToday ? "Today" : format(currentDate, "MMM d, yyyy")}
-            </div>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={() => setCurrentDate(addDays(currentDate, 1))}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList>
+              <TabsTrigger value="plans">Weekly/Quarterly Plans</TabsTrigger>
+              <TabsTrigger value="daily">Daily Tasks</TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
+
+        {activeTab === "plans" ? (
+          <TeamPlanner />
+        ) : (
+          <>
+            <div className="flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-4 bg-muted/50 rounded-lg p-1">
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  onClick={() => setCurrentDate(subDays(currentDate, 1))}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div className="w-32 text-center font-medium">
+                  {isToday ? "Today" : format(currentDate, "MMM d, yyyy")}
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  onClick={() => setCurrentDate(addDays(currentDate, 1))}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
 
         <div className="flex items-center gap-4 shrink-0">
           <Select value={statusFilter} onValueChange={(val) => setStatusFilter(val || "all")}>
@@ -237,7 +253,9 @@ export default function TeamActionItemsPage() {
             </div>
           </div>
         )}
-      </div>
-    </RequireRole>
-  );
+        </>
+      )}
+    </div>
+  </RequireRole>
+);
 }

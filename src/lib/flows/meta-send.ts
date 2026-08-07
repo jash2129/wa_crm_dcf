@@ -7,6 +7,7 @@ import {
   type InteractiveListSection,
   type MediaKind,
 } from '@/lib/whatsapp/meta-api'
+import { sendInstagramMessage, sendFacebookMessage } from '@/lib/meta/channels-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
   sanitizePhoneForMeta,
@@ -46,78 +47,123 @@ interface SendTextEngineArgs {
 }
 
 /**
- * Send a plain-text WhatsApp message from the Flows engine.
- *
- * Used by the runner's `send_message` and `collect_input` nodes —
- * both prompt the customer with text and either auto-advance (the
- * send_message case) or suspend awaiting a text reply (collect_input).
- *
- * Wraps the same phone-variant retry + DB persistence pattern as the
- * interactive senders; the duplication will be DRY'd into a shared
- * `engineSendBase` once the v2 features (templates with variables,
- * media sends) settle.
+ * Send a plain-text message from the Flows bot engine across WhatsApp,
+ * Instagram, or Facebook Messenger depending on conversation channel.
  */
 export async function engineSendText(
   args: SendTextEngineArgs,
 ): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
 
+  const { data: conv } = await db
+    .from('conversations')
+    .select('channel')
+    .eq('id', args.conversationId)
+    .maybeSingle()
+
+  const channel = conv?.channel || 'whatsapp'
+
   const { data: contact, error: contactErr } = await db
     .from('contacts')
-    .select('id, phone')
+    .select('id, phone, instagram_id, facebook_psid')
     .eq('id', args.contactId)
     .eq('account_id', args.accountId)
     .maybeSingle()
-  if (contactErr || !contact?.phone) {
+
+  if (contactErr || !contact) {
     throw new Error('contact not found for this account')
   }
 
-  const sanitized = sanitizePhoneForMeta(contact.phone)
-  if (!isValidE164(sanitized)) {
-    throw new Error(`contact phone invalid: ${contact.phone}`)
-  }
-
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', args.accountId)
-    .single()
-  if (configErr || !config) {
-    throw new Error('WhatsApp not configured for this account')
-  }
-
-  const accessToken = decrypt(config.access_token)
-
-  const attempt = async (phone: string): Promise<string> => {
-    const r = await sendTextMessage({
-      phoneNumberId: config.phone_number_id,
-      accessToken,
-      to: phone,
-      text: args.text,
-    })
-    return r.messageId
-  }
-
-  const variants = phoneVariants(sanitized)
-  let workingPhone = sanitized
   let waMessageId = ''
-  let lastError: unknown = null
-  for (const v of variants) {
-    try {
-      waMessageId = await attempt(v)
-      workingPhone = v
-      lastError = null
-      break
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (!isRecipientNotAllowedError(msg)) throw err
-      lastError = err
-    }
-  }
-  if (lastError) throw lastError
 
-  if (workingPhone !== sanitized) {
-    await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
+  if (channel === 'instagram') {
+    if (!contact.instagram_id) throw new Error('contact has no instagram_id')
+    const { data: igConn } = await db
+      .from('channel_connections')
+      .select('access_token')
+      .eq('account_id', args.accountId)
+      .eq('channel_type', 'instagram')
+      .eq('status', 'connected')
+      .maybeSingle()
+
+    if (!igConn?.access_token) throw new Error('Instagram channel not connected')
+    let decryptedToken = igConn.access_token
+    try { decryptedToken = decrypt(decryptedToken) } catch {}
+
+    const res = await sendInstagramMessage({
+      recipientId: contact.instagram_id,
+      text: args.text,
+      accessToken: decryptedToken,
+    })
+    waMessageId = res.messageId
+  } else if (channel === 'facebook') {
+    if (!contact.facebook_psid) throw new Error('contact has no facebook_psid')
+    const { data: fbConn } = await db
+      .from('channel_connections')
+      .select('access_token')
+      .eq('account_id', args.accountId)
+      .eq('channel_type', 'facebook')
+      .eq('status', 'connected')
+      .maybeSingle()
+
+    if (!fbConn?.access_token) throw new Error('Facebook channel not connected')
+    let decryptedToken = fbConn.access_token
+    try { decryptedToken = decrypt(decryptedToken) } catch {}
+
+    const res = await sendFacebookMessage({
+      recipientId: contact.facebook_psid,
+      text: args.text,
+      accessToken: decryptedToken,
+    })
+    waMessageId = res.messageId
+  } else {
+    if (!contact.phone) throw new Error('contact has no phone for WhatsApp')
+    const sanitized = sanitizePhoneForMeta(contact.phone)
+    if (!isValidE164(sanitized)) {
+      throw new Error(`contact phone invalid: ${contact.phone}`)
+    }
+
+    const { data: config, error: configErr } = await db
+      .from('whatsapp_config')
+      .select('*')
+      .eq('account_id', args.accountId)
+      .single()
+    if (configErr || !config) {
+      throw new Error('WhatsApp not configured for this account')
+    }
+
+    const accessToken = decrypt(config.access_token)
+
+    const attempt = async (phone: string): Promise<string> => {
+      const r = await sendTextMessage({
+        phoneNumberId: config.phone_number_id,
+        accessToken,
+        to: phone,
+        text: args.text,
+      })
+      return r.messageId
+    }
+
+    const variants = phoneVariants(sanitized)
+    let workingPhone = sanitized
+    let lastError: unknown = null
+    for (const v of variants) {
+      try {
+        waMessageId = await attempt(v)
+        workingPhone = v
+        lastError = null
+        break
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (!isRecipientNotAllowedError(msg)) throw err
+        lastError = err
+      }
+    }
+    if (lastError) throw lastError
+
+    if (workingPhone !== sanitized) {
+      await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
+    }
   }
 
   const { error: msgErr } = await db.from('messages').insert({

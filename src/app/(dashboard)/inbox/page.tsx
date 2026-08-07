@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { Conversation, Message, Contact, ConversationStatus } from "@/types";
 import { useRealtime } from "@/hooks/use-realtime";
 import { useAuth } from "@/hooks/use-auth";
+import { useGlobalPresence } from "@/hooks/use-global-presence";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
@@ -21,6 +22,7 @@ export default function InboxPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, profile } = useAuth();
+  const { setViewingConversation, getViewingAgents } = useGlobalPresence();
   /**
    * `?c=<id>` deep-link support. Used when landing here from the
    * dashboard's recent-conversations list so the right thread opens
@@ -62,6 +64,16 @@ export default function InboxPage() {
       // localStorage can throw in private-browsing / sandboxed contexts.
     }
   }, []);
+
+  // Sync active conversation with global presence for Agent Collision Prevention
+  useEffect(() => {
+    setViewingConversation(activeConversation?.id || null);
+    return () => {
+      setViewingConversation(null);
+    };
+  }, [activeConversation?.id, setViewingConversation]);
+
+  const viewingAgents = activeConversation ? getViewingAgents(activeConversation.id) : [];
 
   const handleToggleContactPanel = useCallback(() => {
     setContactPanelOpen((prev) => {
@@ -680,6 +692,7 @@ export default function InboxPage() {
             onRefresh={handleManualRefresh}
             contactPanelOpen={contactPanelOpen}
             onToggleContactPanel={handleToggleContactPanel}
+            viewingAgents={viewingAgents}
           />
         </div>
 
